@@ -45,5 +45,5 @@ test('desempenho da exportação local (20 s de vídeo)', async ({ page }) => {
   await download.saveAs(saved);
   const info = probe(saved);
   console.log(`EXPORT_SECONDS=${seconds.toFixed(1)} duration=${info.duration.toFixed(2)} streams=${info.streams.join(',')}`);
-  expect(Math.abs(info.duration - 20)).toBeLessThan(0.3);
+  expect(Math.abs(info.duration - 23.5)).toBeLessThan(0.3); // 20 s + encerramento automático
 });

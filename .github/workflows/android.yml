@@ -4,7 +4,7 @@ name: APK Android
 # e publica em Releases com link direto para baixar no celular.
 on:
   push:
-    branches: [pablo]
+    branches: [main, pablo]
   workflow_dispatch:
 
 permissions:

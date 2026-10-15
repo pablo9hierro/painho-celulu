@@ -20,6 +20,7 @@ import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
 import { effectiveTransform, patchClip } from '../core/edit';
 import { ensureOutroAudio } from './importer';
+import { outroAuto } from './frameLogos';
 
 const st = getEditor;
 
@@ -370,13 +371,42 @@ export function nudge(dx: number, dy: number) {
  * Encerramento estilo TikTok: tela final com a logo e o @perfil + som de
  * encerramento, colocados juntos logo depois do fim do vídeo.
  */
+const OUTRO_PRESET = 'pn-encerramento';
+
+/** Cartão do encerramento ocupando o quadro inteiro (sem faixas acima e abaixo). */
+function outroCard(p: Project, start: number) {
+  const c = createTextClip(p, OUTRO_PRESET, start);
+  c.transform = { ...c.transform, x: p.width / 2, y: p.height / 2, width: p.width, height: p.height };
+  return c;
+}
+
+export const hasOutro = (p: Project) => p.clips.some((c) => c.type === 'text' && c.preset === OUTRO_PRESET);
+
+/**
+ * Projeto que vai para a exportação: com o encerramento (cartão + som) no fim,
+ * se estiver ligado e se o usuário já não tiver colocado um na timeline.
+ * Não altera o projeto salvo.
+ */
+export async function projectForExport(p: Project): Promise<Project> {
+  const start = projectDuration(p);
+  if (!outroAuto() || start <= 0 || hasOutro(p)) return p;
+  let next = placeClip(p, outroCard(p, start));
+  try {
+    const m = await ensureOutroAudio();
+    const a = createAudioClip(next, m, start);
+    a.name = 'Som do encerramento';
+    next = placeClip(next, a);
+  } catch {
+    /* sem o som, o encerramento vai mudo */
+  }
+  return next;
+}
+
 export async function addOutro() {
   const s = st();
   if (!s.project) return;
   const start = projectDuration(s.project);
-  const c = createTextClip(s.project, 'pn-encerramento', start);
-  // tela final ocupa o quadro inteiro (sem faixas acima e abaixo)
-  c.transform = { ...c.transform, x: s.project.width / 2, y: s.project.height / 2, width: s.project.width, height: s.project.height };
+  const c = outroCard(s.project, start);
   s.apply((p) => placeClip(p, c));
   s.select([c.id]);
   s.setTime(start);

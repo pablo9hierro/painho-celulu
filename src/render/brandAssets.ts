@@ -12,11 +12,13 @@ import roundUrl from '../assets/pn-logo-round.png';
  * `watermark` = logo horizontal sobre fundo preto; `symbol` = só o símbolo "pn"
  * sobre fundo preto (carimbo das manchetes, mesclagem "screen").
  */
-export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol' | 'round';
+export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol' | 'round' | 'outro';
+/** Logos que o usuário pode trocar (molduras e encerramento). */
+export type CustomLogo = 'horizontal' | 'round' | 'outro';
 
-export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508, round: 1238 / 1058 };
+export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508, round: 1237 / 1000, outro: 1214 / 1058 };
 
-const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl, round: roundUrl };
+const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl, round: roundUrl, outro: normalUrl };
 const imgs: Partial<Record<BrandLogo, HTMLImageElement>> = {};
 const listeners = new Set<() => void>();
 let ready: Promise<void> | null = null;
@@ -36,7 +38,7 @@ function load(k: BrandLogo): Promise<void> {
 }
 
 export function ensureBrandAssets(): Promise<void> {
-  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol'), load('round')]).then(() => undefined);
+  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol'), load('round'), load('outro')]).then(() => undefined);
   return ready;
 }
 
@@ -46,14 +48,14 @@ export function brandImage(k: BrandLogo): HTMLImageElement | null {
 }
 
 /**
- * Logos da moldura escolhidas pelo usuário (horizontal e redonda). `null` volta
+ * Logos escolhidas pelo usuário (moldura horizontal, redonda e encerramento). `null` volta
  * para a logo embutida. A proporção é atualizada pela imagem carregada.
  */
 let version = 0;
 export function brandVersion() {
   return version;
 }
-export function setLogoOverride(kind: 'horizontal' | 'round', url: string | null): Promise<void> {
+export function setLogoOverride(kind: CustomLogo, url: string | null): Promise<void> {
   const src = url ?? urls[kind];
   if (imgs[kind]?.src && new URL(src, location.href).href === imgs[kind]!.src) return Promise.resolve();
   return new Promise((resolve) => {

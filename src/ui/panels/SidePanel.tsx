@@ -10,7 +10,7 @@ import { renderFrame } from '../../render/renderer';
 import { IS_LOCAL, media as mediaApi } from '../../platform/api';
 import { getEditor, useEditor, type Panel } from '../../state/store';
 import { addMedia, addOutro, addText, applyFrameCmd } from '../commands';
-import { BUILTIN, BUILTIN_URL, getFrameLogo, setFrameLogo, type FrameLogoKind } from '../frameLogos';
+import { BUILTIN, BUILTIN_URL, getFrameLogo, outroAuto, setFrameLogo, setOutroAuto, type FrameLogoKind } from '../frameLogos';
 import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress } from '../importer';
 import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
@@ -248,13 +248,7 @@ function TextPanel() {
       </section>
       <section className="preset-section">
         <h4>Encerramento</h4>
-        <button className="template-card outro-card" onClick={() => void addOutro()} data-testid="add-outro">
-          <PresetThumb presetId="pn-encerramento" />
-          <span>
-            <strong>Fim do vídeo · @primeirasnoticias_</strong>
-            <span className="muted small">Tela final estilo TikTok com a logo, o perfil e o som de encerramento. Entra depois do último item.</span>
-          </span>
-        </button>
+        <OutroSettings />
       </section>
       {CATS.map((cat) => (
         <section key={cat.id} className="preset-section">
@@ -422,24 +416,58 @@ function VoiceDisguise() {
  * Logos da moldura: enviar imagens e marcar qual é a padrão (horizontal para o
  * cabeçalho, redonda para a marca grande que passa no fundo). Troca na hora.
  */
-function FrameLogos() {
+const FRAME_ROWS: { kind: FrameLogoKind; label: string }[] = [
+  { kind: 'horizontal', label: 'Logo horizontal (cabeçalho)' },
+  { kind: 'round', label: 'Logo redonda (marca no fundo)' },
+];
+const OUTRO_ROWS: { kind: FrameLogoKind; label: string }[] = [{ kind: 'outro', label: 'Logo do encerramento' }];
+
+/** Encerramento estilo TikTok: entra sozinho no fim de toda exportação. */
+function OutroSettings() {
+  const [auto, setAuto] = useState(outroAuto);
+  return (
+    <div className="outro-settings">
+      <div className="template-card outro-card">
+        <PresetThumb presetId="pn-encerramento" />
+        <span>
+          <strong>Fim do vídeo · @primeirasnoticias_</strong>
+          <span className="muted small">Tela final estilo TikTok com a logo, o perfil e o som. Entra sozinha no fim de todo vídeo exportado — não precisa colocar na timeline.</span>
+        </span>
+      </div>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={auto}
+          onChange={(e) => {
+            setAuto(e.target.checked);
+            setOutroAuto(e.target.checked);
+          }}
+          data-testid="outro-auto"
+        />
+        Colocar automaticamente ao exportar
+      </label>
+      <FrameLogos rows={OUTRO_ROWS} title="Logo do encerramento" testId="outro-logos" />
+      <button className="btn sm ghost" onClick={() => void addOutro()} data-testid="add-outro" title="Coloca o encerramento na timeline para ver como fica antes de exportar">
+        Ver na timeline
+      </button>
+    </div>
+  );
+}
+
+function FrameLogos({ rows = FRAME_ROWS, title = 'Logos da moldura', testId = 'frame-logos' }: { rows?: { kind: FrameLogoKind; label: string }[]; title?: string; testId?: string }) {
   const all = useEditor((s) => s.media);
   const brand = Object.values(all).filter((m) => m.brand && m.kind === 'image' && m.status === 'ready');
-  const [sel, setSel] = useState<Record<FrameLogoKind, string>>(() => ({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round') }));
+  const [sel, setSel] = useState<Record<FrameLogoKind, string>>(() => ({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round'), outro: getFrameLogo('outro') }));
   const input = useRef<HTMLInputElement>(null);
   const choose = (kind: FrameLogoKind, id: string) => {
     setFrameLogo(kind, id, getEditor().media);
     setSel((s) => ({ ...s, [kind]: id }));
   };
-  const rows: { kind: FrameLogoKind; label: string }[] = [
-    { kind: 'horizontal', label: 'Logo horizontal (cabeçalho)' },
-    { kind: 'round', label: 'Logo redonda (marca no fundo)' },
-  ];
   return (
-    <div className="frame-logos" data-testid="frame-logos">
+    <div className="frame-logos" data-testid={testId}>
       <div className="row-between">
-        <h5>Logos da moldura</h5>
-        <button className="btn sm" onClick={() => input.current?.click()} data-testid="frame-logo-upload">
+        <h5>{title}</h5>
+        <button className="btn sm" onClick={() => input.current?.click()} data-testid={`${testId}-upload`}>
           <IconUpload /> Enviar
         </button>
       </div>

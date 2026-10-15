@@ -121,7 +121,8 @@ test('fluxo completo: importar, manchete, manipular, desfocar, cortar e exportar
   expect(info.width).toBe(1080);
   expect(info.height).toBe(1920);
   const total = vids[0]!.duration + vids[1]!.duration;
-  expect(Math.abs(info.duration - Math.max(total, s.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0)))).toBeLessThan(0.25);
+  // + 3,5 s do encerramento automático no fim
+  expect(Math.abs(info.duration - Math.max(total, s.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0)) - 3.5)).toBeLessThan(0.25);
 
   expect(errors).toEqual([]);
 });

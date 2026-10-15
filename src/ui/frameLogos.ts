@@ -7,10 +7,11 @@ import type { MediaAsset } from '../core/model';
 import { setLogoOverride } from '../render/brandAssets';
 import horizontalUrl from '../assets/pn-logo-horizontal.png';
 import roundUrl from '../assets/pn-logo-round.png';
+import normalUrl from '../assets/pn-logo-normal.png';
 
-export type FrameLogoKind = 'horizontal' | 'round';
+export type FrameLogoKind = 'horizontal' | 'round' | 'outro';
 export const BUILTIN = 'builtin';
-export const BUILTIN_URL: Record<FrameLogoKind, string> = { horizontal: horizontalUrl, round: roundUrl };
+export const BUILTIN_URL: Record<FrameLogoKind, string> = { horizontal: horizontalUrl, round: roundUrl, outro: normalUrl };
 
 const key = (k: FrameLogoKind) => `pn-frame-logo-${k}`;
 
@@ -29,7 +30,7 @@ function urlFor(id: string, media: Record<string, MediaAsset>): string | null {
 
 /** Aplica as logos escolhidas (chamado ao abrir o editor e ao trocar a padrão). */
 export function applyFrameLogos(media: Record<string, MediaAsset>) {
-  for (const kind of ['horizontal', 'round'] as const) {
+  for (const kind of ['horizontal', 'round', 'outro'] as const) {
     void setLogoOverride(kind, urlFor(getFrameLogo(kind), media));
   }
 }
@@ -41,4 +42,21 @@ export function setFrameLogo(kind: FrameLogoKind, id: string, media: Record<stri
     /* sem armazenamento: vale só nesta sessão */
   }
   void setLogoOverride(kind, urlFor(id, media));
+}
+
+/** Encerramento automático no fim de toda exportação (ligado por padrão). */
+const OUTRO_KEY = 'pn-outro-auto';
+export function outroAuto(): boolean {
+  try {
+    return localStorage.getItem(OUTRO_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+export function setOutroAuto(on: boolean) {
+  try {
+    localStorage.setItem(OUTRO_KEY, on ? '1' : '0');
+  } catch {
+    /* sem armazenamento */
+  }
 }

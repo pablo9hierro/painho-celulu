@@ -49,7 +49,11 @@ test('modo local: importar, editar e exportar MP4 sem servidor', async ({ page }
   expect(info.streams).toContain('audio');
   expect(info.width).toBe(1080);
   expect(info.height).toBe(1920);
-  expect(Math.abs(info.duration - 6)).toBeLessThan(0.3);
+  expect(Math.abs(info.duration - 9.5)).toBeLessThan(0.3); // 6 s + encerramento automático (3,5 s)
+
+  // o encerramento foi só para o vídeo: a timeline salva não mudou
+  await page.getByTestId('export-dialog').getByLabel('Fechar').click();
+  await expect(page.getByTestId('clip-text')).toHaveCount(1);
 
   expect(apiCalls).toEqual([]);
   expect(errors).toEqual([]);

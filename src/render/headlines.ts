@@ -681,101 +681,158 @@ function plain(ctx: C, c: TextClip, { w, h }: HeadlineArgs) {
   noShadow(ctx);
 }
 
+/** Cópias da logo tingidas (ciano e vermelho do TikTok) para a separação RGB. */
+const tintCache = new WeakMap<HTMLImageElement, { cyan: HTMLCanvasElement; red: HTMLCanvasElement }>();
+function tinted(img: HTMLImageElement) {
+  let v = tintCache.get(img);
+  if (v) return v;
+  const k = Math.min(1, 900 / Math.max(1, img.naturalWidth));
+  const mk = (color: string) => {
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(img.naturalWidth * k));
+    cv.height = Math.max(1, Math.round(img.naturalHeight * k));
+    const g = cv.getContext('2d')!;
+    g.drawImage(img, 0, 0, cv.width, cv.height);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = color;
+    g.fillRect(0, 0, cv.width, cv.height);
+    return cv;
+  };
+  v = { cyan: mk('#25F4EE'), red: mk('#FE2C55') };
+  tintCache.set(img, v);
+  return v;
+}
+
+/** Aleatório determinístico (mesmo quadro = mesmo glitch na prévia e na exportação). */
+const rnd = (n: number) => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
+
+/** Intensidade do glitch: forte na entrada da logo e dois "soluços" depois. */
+function glitchAt(t: number) {
+  const bump = (a: number, b: number, k: number) => (t >= a && t <= b ? k * Math.sin(((t - a) / (b - a)) * Math.PI) : 0);
+  return Math.max(bump(0.1, 0.85, 1), bump(1.5, 1.66, 0.7), bump(2.32, 2.44, 0.55));
+}
+
+/** Desenha a imagem em faixas horizontais deslocadas (efeito de sinal quebrado). */
+function drawSliced(ctx: C, src: HTMLImageElement | HTMLCanvasElement, x: number, y: number, w: number, h: number, glitch: number, n: number, salt: number) {
+  if (glitch < 0.04) {
+    ctx.drawImage(src, x, y, w, h);
+    return;
+  }
+  const sw = src instanceof HTMLImageElement ? src.naturalWidth : src.width;
+  const sh = src instanceof HTMLImageElement ? src.naturalHeight : src.height;
+  const strips = 9;
+  let a = 0;
+  for (let i = 0; i < strips; i++) {
+    const b = i === strips - 1 ? 1 : Math.min(1, a + (0.4 + rnd(n * 3.1 + i) * 1.2) / strips);
+    const big = rnd(n * 7.7 + i * 1.3 + salt) > 0.62;
+    const dx = (rnd(n * 13 + i * 7 + salt) - 0.5) * 2 * glitch * w * (big ? 0.14 : 0.025);
+    ctx.drawImage(src, 0, a * sh, sw, (b - a) * sh, x + dx, y + a * h, w, (b - a) * h);
+    a = b;
+    if (a >= 1) break;
+  }
+}
+
 /**
- * Encerramento estilo TikTok: fundo azul da marca com luz pulsando, a logo
- * redonda entra com salto e "glitch" (cópias ciano/vermelho que se acomodam),
- * flutua de leve, e o @primeirasnoticias_ com o símbolo do Instagram sobe por baixo.
+ * Encerramento estilo TikTok, com a cara da Primeiras Notícias: fundo escuro,
+ * logo entra com glitch (cópias ciano/vermelho, faixas deslocadas, tremida),
+ * depois o @perfil aparece com o mesmo efeito. A logo é a escolhida pelo usuário.
  */
-function encerramento(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
-  // fundo
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#061433');
-  g.addColorStop(0.55, PN.deep);
-  g.addColorStop(1, '#040c1f');
-  ctx.fillStyle = g;
+function encerramento(ctx: C, c: TextClip, { w, h, t }: HeadlineArgs) {
+  const n = Math.floor(t * 24);
+  const glitch = glitchAt(t);
+  // fundo quase preto com o azul da marca pulsando atrás da logo
+  ctx.fillStyle = '#02060e';
   ctx.fillRect(0, 0, w, h);
-  const pulse = 0.75 + 0.25 * Math.sin(t * Math.PI * 1.6);
-  const cy = h * 0.42;
-  const rg = ctx.createRadialGradient(w / 2, cy, 0, w / 2, cy, w * 0.75);
-  rg.addColorStop(0, `rgba(56,182,255,${0.42 * pulse})`);
-  rg.addColorStop(1, 'rgba(56,182,255,0)');
+  const cy = h * 0.4;
+  const pulse = 0.8 + 0.2 * Math.sin(t * Math.PI * 1.4);
+  const rg = ctx.createRadialGradient(w / 2, cy, 0, w / 2, cy, w * 0.85);
+  rg.addColorStop(0, `rgba(20,90,200,${0.55 * pulse})`);
+  rg.addColorStop(0.55, 'rgba(10,40,110,0.25)');
+  rg.addColorStop(1, 'rgba(2,6,14,0)');
   ctx.fillStyle = rg;
   ctx.fillRect(0, 0, w, h);
-  // feixe de luz atravessando
-  const sweep = ((t * 0.55) % 1.6) - 0.3;
-  ctx.save();
-  ctx.globalCompositeOperation = 'screen';
-  const sx = sweep * w * 1.4;
-  const sg = ctx.createLinearGradient(sx - w * 0.2, 0, sx + w * 0.2, 0);
-  sg.addColorStop(0, 'rgba(150,215,255,0)');
-  sg.addColorStop(0.5, 'rgba(150,215,255,0.12)');
-  sg.addColorStop(1, 'rgba(150,215,255,0)');
-  ctx.fillStyle = sg;
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
 
-  // logo redonda: salto de entrada + glitch que se acomoda + flutuação
-  const img = brandImage('round');
-  const enter = seg(p, 0, 0.6);
-  const s = enter < 1 ? Math.max(0, ease.outBack(enter)) : 1;
-  const lw = w * 0.74;
-  const lh = lw / LOGO_RATIO.round;
-  const fy = Math.sin(t * Math.PI * 0.9) * h * 0.006;
-  if (img && s > 0) {
+  // barras de interferência no fundo durante o glitch
+  if (glitch > 0.25) {
     ctx.save();
-    ctx.translate(w / 2, cy + fy);
-    ctx.scale(s, s);
-    const jitter = Math.max(0, 1 - t / 0.9); // o glitch some em ~1 s
-    const off = w * 0.018 * jitter * (0.6 + 0.4 * Math.sin(t * 47));
-    if (off > 0.5) {
-      ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 0.75;
-      ctx.filter = 'sepia(1) saturate(6) hue-rotate(150deg)';
-      ctx.drawImage(img, -lw / 2 - off, -lh / 2, lw, lh);
-      ctx.filter = 'sepia(1) saturate(6) hue-rotate(-40deg)';
-      ctx.drawImage(img, -lw / 2 + off, -lh / 2, lw, lh);
-      ctx.filter = 'none';
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < 5; i++) {
+      const by = rnd(n * 5 + i) * h;
+      const bh = h * (0.004 + rnd(n * 9 + i) * 0.03);
+      ctx.fillStyle = i % 2 ? `rgba(37,244,238,${0.18 * glitch})` : `rgba(254,44,85,${0.18 * glitch})`;
+      ctx.fillRect(0, by, w, bh);
     }
-    ctx.shadowColor = 'rgba(56,182,255,0.8)';
-    ctx.shadowBlur = w * 0.05;
-    ctx.drawImage(img, -lw / 2, -lh / 2, lw, lh);
     ctx.restore();
   }
 
-  // chamada + @perfil subindo por baixo
-  const hp = eo(seg(p, 0.45, 1));
-  if (hp > 0) {
-    const baseY = h * 0.74 + (1 - hp) * h * 0.05;
+  // logo
+  const img = brandImage('outro');
+  const enter = clamp((t - 0.12) / 0.5, 0, 1);
+  if (img && enter > 0) {
+    const ratio = LOGO_RATIO.outro;
+    let lw = w * 0.8;
+    let lh = lw / ratio;
+    if (lh > h * 0.42) {
+      lh = h * 0.42;
+      lw = lh * ratio;
+    }
+    const s = Math.max(0, ease.outBack(enter)) * (1 + 0.012 * Math.sin(t * Math.PI * 1.4));
+    const shx = glitch * w * 0.016 * (rnd(n + 0.5) - 0.5) * 2;
+    const shy = glitch * w * 0.01 * (rnd(n + 0.9) - 0.5) * 2;
+    const off = w * (0.006 + 0.028 * glitch);
+    const tint = tinted(img);
     ctx.save();
-    ctx.globalAlpha *= hp;
-    applyFont(ctx, SANS_SITE, w * 0.034);
-    ctx.fillStyle = PN.sky;
+    ctx.translate(w / 2 + shx, cy + shy);
+    ctx.scale(s, s);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.9;
+    drawSliced(ctx, tint.cyan, -lw / 2 - off, -lh / 2 - off * 0.35, lw, lh, glitch, n, 1);
+    drawSliced(ctx, tint.red, -lw / 2 + off, -lh / 2 + off * 0.35, lw, lh, glitch, n, 2);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = 'rgba(56,160,255,0.55)';
+    ctx.shadowBlur = w * 0.04;
+    drawSliced(ctx, img, -lw / 2, -lh / 2, lw, lh, glitch, n, 3);
+    ctx.restore();
+  }
+
+  // chamada + @perfil
+  const tp = clamp((t - 0.95) / 0.35, 0, 1);
+  if (tp > 0) {
+    const tg = Math.max(glitch, t < 1.3 ? 1 - tp : 0);
+    const baseY = h * 0.71 + (1 - eo(tp)) * h * 0.02;
+    const jx = tg * w * 0.012 * (rnd(n + 3.3) - 0.5) * 2;
+    ctx.save();
+    ctx.globalAlpha *= eo(tp);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText((c.fields.kicker || 'Siga para mais notícias').toLocaleUpperCase('pt-BR'), w / 2, baseY - h * 0.055);
-    applyFont(ctx, SANS_BLACK, w * 0.066);
+    applyFont(ctx, SANS_SITE, w * 0.034);
+    ctx.fillStyle = 'rgba(200,225,255,0.9)';
+    ctx.fillText((c.fields.kicker || 'Siga para mais notícias').toLocaleUpperCase('pt-BR'), w / 2, baseY - h * 0.052);
+
+    applyFont(ctx, SANS_BLACK, w * 0.068);
     const handle = PN.handle;
     const tw = ctx.measureText(handle).width;
-    const gs = w * 0.075;
+    const gs = w * 0.074;
     const gap = w * 0.022;
     const total = gs + gap + tw;
-    const x0 = (w - total) / 2;
+    const x0 = (w - total) / 2 + jx;
     drawInstagramGlyph(ctx, x0, baseY - gs / 2, gs);
-    textShadow(ctx, w * 0.066, 0.5);
-    ctx.fillStyle = PN.white;
+    const tx = x0 + gs + gap;
+    const ty = baseY + w * 0.004;
+    const d = w * (0.0035 + 0.02 * tg);
     ctx.textAlign = 'left';
-    ctx.fillText(handle, x0 + gs + gap, baseY + w * 0.004);
-    noShadow(ctx);
-    // fio luminoso sob o perfil
-    const lwLine = total * eo(seg(p, 0.6, 1));
-    const lgrad = ctx.createLinearGradient(w / 2 - lwLine / 2, 0, w / 2 + lwLine / 2, 0);
-    lgrad.addColorStop(0, 'rgba(56,182,255,0)');
-    lgrad.addColorStop(0.5, 'rgba(56,182,255,1)');
-    lgrad.addColorStop(1, 'rgba(56,182,255,0)');
-    ctx.fillStyle = lgrad;
-    ctx.fillRect(w / 2 - lwLine / 2, baseY + w * 0.05, lwLine, Math.max(3, w * 0.005));
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = '#25F4EE';
+    ctx.fillText(handle, tx - d, ty);
+    ctx.fillStyle = '#FE2C55';
+    ctx.fillText(handle, tx + d, ty);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = PN.white;
+    ctx.fillText(handle, tx, ty);
     ctx.restore();
   }
 }

@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { projectDuration } from '../core/timeline';
 import { getEditor, useEditor } from '../state/store';
 import { deviceStorage, exporter, type ExportProgress } from '../platform/api';
-import { stopPlayback } from './commands';
+import { hasOutro, projectForExport, stopPlayback } from './commands';
+import { outroAuto, setOutroAuto } from './frameLogos';
+
+/** duração do encerramento automático (igual ao modelo pn-encerramento) */
+const OUTRO_S = 3.5;
 import { formatTime } from './Transport';
 import { IconClose } from './icons';
 import { useBackHandler } from '../platform/backButton';
@@ -23,6 +27,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<{ file: string; where: string; blob: Blob; url: string; seconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [outro, setOutro] = useState(outroAuto);
+  const willAddOutro = outro && duration > 0 && !hasOutro(project);
+  const totalDuration = duration + (willAddOutro ? OUTRO_S : 0);
   const abort = useRef<AbortController | null>(null);
   // cada exportação tem um número; ao cancelar, o resultado da anterior é ignorado
   const run = useRef(0);
@@ -53,10 +60,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       if (run.current === my) setProgress(p);
     };
     try {
+      // o encerramento entra só no vídeo exportado; o projeto salvo não muda
+      const out = await projectForExport(project);
+      if (run.current !== my) return;
       const { blob, fileName } = await exporter.exportVideo(
-        project,
+        out,
         getEditor().media,
-        { width, height, fps, duration, crf: QUALITY.find((q) => q.id === quality)!.crf },
+        { width, height, fps, duration: projectDuration(out), crf: QUALITY.find((q) => q.id === quality)!.crf },
         report,
         ctrl.signal,
       );
@@ -145,8 +155,21 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     ))}
                   </div>
                 </div>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={outro}
+                    disabled={hasOutro(project)}
+                    onChange={(e) => {
+                      setOutro(e.target.checked);
+                      setOutroAuto(e.target.checked);
+                    }}
+                    data-testid="export-outro"
+                  />
+                  {hasOutro(project) ? 'Encerramento @primeirasnoticias_ já está na timeline' : 'Encerramento @primeirasnoticias_ no final (+3,5 s)'}
+                </label>
                 <p className="muted small">
-                  MP4 · H.264 + AAC · {formatTime(duration, fps)} · {Math.round(duration * fps)} quadros. Renderizado no seu computador com o mesmo motor do preview.
+                  MP4 · H.264 + AAC · {formatTime(totalDuration, fps)} · {Math.round(totalDuration * fps)} quadros. Renderizado no seu computador com o mesmo motor do preview.
                 </p>
                 {error && <p className="error-text">{error}</p>}
                 <button className="btn primary wide" onClick={() => void start()} data-testid="start-export">

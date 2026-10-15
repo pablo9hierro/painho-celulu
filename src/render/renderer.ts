@@ -177,7 +177,7 @@ function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
   const win = frameWindow(def, W, H);
   const full = win.w >= W - 0.5 && win.h >= H - 0.5;
   ctx.drawImage(frameLayer(ctx, def, W, H, 'bg'), 0, 0, W, H);
-  if (!full) drawFrameWatermark(ctx, win, W, H, clip.duration > 0 ? t / clip.duration : 0);
+  if (!full) drawFrameWatermark(ctx, win, W, H, t);
   ctx.drawImage(frameLayer(ctx, def, W, H, 'fg'), 0, 0, W, H);
   if (def.ticker) {
     const th = W * 0.075;
@@ -192,22 +192,54 @@ function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
  * Logo redonda grande e "vazada" no fundo azul da moldura, atravessando o quadro
  * devagar durante o tempo em que a moldura está no ar (só fora da janela do vídeo).
  */
-function drawFrameWatermark(ctx: C, win: { x: number; y: number; w: number; h: number }, W: number, H: number, progress: number) {
+/**
+ * Posição do símbolo gigante no fundo da moldura no instante t (segundos desde
+ * o início do item). Anda muito devagar, com a direção oscilando suavemente
+ * (soma de senos lentos, sem viradas bruscas) e tendência geral para cima/esquerda.
+ * Pode vazar pelas bordas; quando sai da tela por inteiro, reaparece do lado
+ * oposto e continua. Determinístico: prévia e exportação mostram o mesmo.
+ */
+function watermarkPose(t: number, W: number, H: number, lw: number, lh: number) {
+  const speed = W * 0.022; // px/s — muito lento
+  const base = Math.atan2(-H, -W); // em direção ao canto superior esquerdo
+  let x = W * 0.72;
+  let y = H * 0.66;
+  const dt = 1 / 15;
+  const steps = Math.min(Math.ceil(Math.max(0, t) / dt), 20_000);
+  for (let i = 0; i < steps; i++) {
+    const s = Math.min(dt, t - i * dt);
+    const u = i * dt;
+    const ang = base + 1.15 * Math.sin(u * 0.11 + 1.3) + 0.65 * Math.sin(u * 0.27 + 4.1) + 0.3 * Math.sin(u * 0.53 + 0.7);
+    const v = speed * (0.75 + 0.25 * Math.sin(u * 0.19 + 2.2));
+    x += Math.cos(ang) * v * s;
+    y += Math.sin(ang) * v * s;
+    // saiu por inteiro: volta pelo lado oposto, ainda fora da tela, e entra andando
+    if (x < -lw / 2) x += W + lw;
+    else if (x > W + lw / 2) x -= W + lw;
+    if (y < -lh / 2) y += H + lh;
+    else if (y > H + lh / 2) y -= H + lh;
+  }
+  const rot = (3 * Math.PI / 180) * Math.sin(t * 0.17 + 0.5);
+  return { x, y, rot };
+}
+
+/** Símbolo PN gigante e vazado passeando devagar no fundo da moldura (fora da janela do vídeo). */
+function drawFrameWatermark(ctx: C, win: { x: number; y: number; w: number; h: number }, W: number, H: number, elapsed: number) {
   const img = brandImage('round');
   if (!img) return;
-  const lh = H * 0.78;
-  const lw = lh * LOGO_RATIO.round;
-  const p = Math.min(1, Math.max(0, progress));
-  const cx = W * (0.08 + 0.84 * p); // da esquerda para a direita, bem devagar
-  const cy = H * 0.5;
+  const lw = W * 1.9;
+  const lh = lw / LOGO_RATIO.round;
+  const pose = watermarkPose(elapsed, W, H, lw, lh);
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, W, H);
   ctx.rect(win.x, win.y, win.w, win.h);
   ctx.clip('evenodd');
   ctx.globalCompositeOperation = 'screen';
-  ctx.globalAlpha *= 0.16;
-  ctx.drawImage(img, cx - lw / 2, cy - lh / 2, lw, lh);
+  ctx.globalAlpha *= 0.18;
+  ctx.translate(pose.x, pose.y);
+  ctx.rotate(pose.rot);
+  ctx.drawImage(img, -lw / 2, -lh / 2, lw, lh);
   ctx.restore();
 }
 
