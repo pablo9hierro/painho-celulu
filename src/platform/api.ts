@@ -12,6 +12,7 @@ import { serverExporter, serverHealth, serverMedia, serverProjects } from './ser
 import { localMedia } from './local/localMedia';
 import { localProjects } from './local/localProjects';
 import { localExporter } from '../engine/webcodecsExporter';
+import { withCutout } from './imagePrep';
 
 export type { ExportProgress, ExportSettings, ProjectSummary } from './types';
 export { deviceStorage } from './device';
@@ -30,7 +31,8 @@ function detectLocal(): boolean {
 export const IS_LOCAL = detectLocal();
 
 export const projects: ProjectStore = IS_LOCAL ? localProjects : serverProjects;
-export const media: MediaService = IS_LOCAL ? localMedia : serverMedia;
+// todo upload de imagem remove fundo liso (logo que virou JPG com fundo branco)
+export const media: MediaService = withCutout(IS_LOCAL ? localMedia : serverMedia);
 export const exporter: Exporter = IS_LOCAL ? localExporter : serverExporter;
 
 export async function health(): Promise<{ ok: boolean; ffmpeg: string | null; error: string | null }> {

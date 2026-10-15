@@ -19,7 +19,9 @@ import { coverWindow, fitVideosToFrame, frameAt, getFrame, insertFrame } from '.
 import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
 import { effectiveTransform, patchClip } from '../core/edit';
-import { ensureOutroAudio } from './importer';
+import { ensureOutroAudio, waitReady } from './importer';
+import { cutoutImage } from '../platform/imagePrep';
+import { media as mediaApi } from '../platform/api';
 import { outroAuto } from './frameLogos';
 
 const st = getEditor;
@@ -371,6 +373,36 @@ export function nudge(dx: number, dy: number) {
  * Encerramento estilo TikTok: tela final com a logo e o @perfil + som de
  * encerramento, colocados juntos logo depois do fim do vídeo.
  */
+/**
+ * Remove o fundo liso de uma imagem que já está no projeto (ex.: logo enviada
+ * antes, que veio em JPG com fundo branco). Cria uma cópia PNG transparente e
+ * troca a imagem do item por ela.
+ */
+export async function removeImageBackground(clipId: string) {
+  const s = st();
+  const clip = s.project?.clips.find((c) => c.id === clipId);
+  if (!clip || clip.type !== 'image') return;
+  const m = s.media[clip.mediaId];
+  if (!m) return;
+  try {
+    const blob = await (await fetch(m.url)).blob();
+    const file = new File([blob], m.name, { type: blob.type });
+    const out = await cutoutImage(file, { minBorder: 0.6 });
+    if (out === file) {
+      st().notify('Esta imagem já é transparente ou não tem um fundo de cor única para remover.', 'info');
+      return;
+    }
+    const up = await mediaApi.upload(out);
+    st().upsertMedia(up);
+    const ready = await waitReady(up.id);
+    if (ready.status !== 'ready') throw new Error(ready.error ?? 'falha ao processar');
+    st().apply((p) => patchClip(p, clipId, { mediaId: ready.id } as Partial<Clip>));
+    st().notify('Fundo removido.', 'info');
+  } catch (e) {
+    st().notify(`Não foi possível remover o fundo: ${(e as Error).message}`, 'error');
+  }
+}
+
 const OUTRO_PRESET = 'pn-encerramento';
 
 /** Cartão do encerramento ocupando o quadro inteiro (sem faixas acima e abaixo). */

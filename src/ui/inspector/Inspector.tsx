@@ -12,7 +12,7 @@ import { BRAND_SWATCHES, PN } from '../../core/brand';
 import { clearKeyframes, effectiveTransform, patchClip, setTransformAt, toggleKeyframeAt } from '../../core/edit';
 import { setSpeed, trimEnd } from '../../core/timeline';
 import { getEditor, useEditor } from '../../state/store';
-import { detachAudio, fitSelection, resetClip } from '../commands';
+import { detachAudio, fitSelection, removeImageBackground, resetClip } from '../commands';
 import { IconClose, IconKeyframe } from '../icons';
 
 export function Inspector({ onClose }: { onClose: () => void }) {
@@ -277,14 +277,28 @@ function VideoSection({ clip }: { clip: VideoClip }) {
 }
 
 function ImageSection({ clip }: { clip: ImageClip }) {
+  const [busy, setBusy] = useState(false);
   return (
     <Section title="Enquadramento">
-      <div className="row-gap">
+      <div className="row-gap wrap">
         <button className="btn sm" onClick={() => fitSelection('contain')}>
           Encaixar
         </button>
         <button className="btn sm" onClick={() => fitSelection('cover')}>
           Preencher
+        </button>
+        <button
+          className="btn sm"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            await removeImageBackground(clip.id);
+            setBusy(false);
+          }}
+          title="Tira o fundo branco (ou de cor única) da imagem"
+          data-testid="remove-bg"
+        >
+          {busy ? 'Removendo…' : 'Remover fundo'}
         </button>
       </div>
       <CropControls clip={clip} />

@@ -25,7 +25,7 @@ export function onUploads(l: Listener) {
   return () => listeners.delete(l);
 }
 
-async function waitReady(id: string): Promise<MediaAsset> {
+export async function waitReady(id: string): Promise<MediaAsset> {
   for (;;) {
     const m = await mediaApi.get(id);
     getEditor().upsertMedia(m);
