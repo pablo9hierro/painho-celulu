@@ -90,6 +90,9 @@ export const serverMedia: MediaService = {
   uploadBrand: async (file) => {
     await uploadXhr(`/api/brand?name=${encodeURIComponent(file.name)}`, file);
   },
+  removeBrand: async (id) => {
+    await req(`/api/brand/${encodeURIComponent(id.replace(/^brand:/, ''))}`, { method: 'DELETE' });
+  },
   waveform: (url) => req(url),
 };
 

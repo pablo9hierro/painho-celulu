@@ -80,17 +80,15 @@ export function onBrandLoaded(fn: () => void) {
 
 type C = CanvasRenderingContext2D;
 
-/** Desenha a logo horizontal com altura `h` a partir de (x, y). Retorna a largura ocupada. */
+/**
+ * Desenha a logo com altura `h` a partir de (x, y), exatamente como a imagem é
+ * (sem sombra, brilho ou contorno). Retorna a largura ocupada.
+ */
 export function drawLogo(ctx: C, x: number, y: number, h: number, kind: BrandLogo = 'horizontal'): number {
   const w = h * LOGO_RATIO[kind];
   const img = brandImage(kind);
   if (!img) return w;
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.35)';
-  ctx.shadowBlur = h * 0.12;
-  ctx.shadowOffsetY = h * 0.03;
   ctx.drawImage(img, x, y, w, h);
-  ctx.restore();
   return w;
 }
 

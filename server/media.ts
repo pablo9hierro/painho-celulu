@@ -3,7 +3,7 @@
  * gera miniaturas, forma de onda e — quando o navegador não suporta o codec —
  * um proxy H.264 para o preview.
  */
-import { createWriteStream, existsSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Readable } from 'node:stream';
@@ -295,6 +295,20 @@ export function brandFile(name: string): string | null {
   const safe = path.basename(name);
   const full = path.join(BRAND_DIR, safe);
   return existsSync(full) ? full : null;
+}
+
+/** "Exclui" uma imagem da pasta brand/: move para brand/.lixeira (nada é apagado de vez). */
+export function trashBrandFile(name: string): boolean {
+  const full = brandFile(name);
+  if (!full) return false;
+  const trash = path.join(BRAND_DIR, '.lixeira');
+  mkdirSync(trash, { recursive: true });
+  const base = path.basename(full);
+  let dest = path.join(trash, base);
+  if (existsSync(dest)) dest = path.join(trash, `${Date.now()}-${base}`);
+  renameSync(full, dest);
+  brandCache.delete(base);
+  return true;
 }
 
 export async function saveBrandUpload(stream: Readable, originalName: string): Promise<string> {

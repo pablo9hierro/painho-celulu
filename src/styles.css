@@ -710,23 +710,36 @@ input[type='range'] {
 }
 .media-del {
   position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 24px;
-  height: 24px;
-  display: none;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  display: grid;
   place-items: center;
-  border: 0;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.7);
-  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(10, 14, 22, 0.82);
+  color: #fff;
+  cursor: pointer;
+  z-index: 2;
+}
+.media-del:hover {
+  background: #c0262d;
+  border-color: #c0262d;
 }
 .media-del svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
-.media-item:hover .media-del {
-  display: grid;
+.media-item,
+.logo-opt {
+  position: relative;
+}
+.logo-del {
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
 }
 .media-item.processing {
   opacity: 0.75;

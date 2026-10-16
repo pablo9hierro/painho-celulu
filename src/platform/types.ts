@@ -41,6 +41,8 @@ export interface MediaService {
   remove(id: string): Promise<void>;
   brand(): Promise<MediaAsset[]>;
   uploadBrand(file: File): Promise<void>;
+  /** exclui uma imagem de marca enviada pelo usuário */
+  removeBrand(id: string): Promise<void>;
   waveform(url: string): Promise<{ perSec: number; peaks: number[] }>;
 }
 

@@ -51,5 +51,14 @@ test('upload de logo com fundo branco fica transparente (Mídia e Marca)', async
   await brand.click();
   await page.waitForTimeout(800);
   await page.getByTestId('stage').screenshot({ path: 'test-results/cutout-stage.png' });
+
+  // excluir imagem enviada (lixeira visível) — logos oficiais não têm lixeira
+  // (o painel Marca continua aberto)
+  const del = brand.getByTestId('brand-del');
+  await expect(del).toBeVisible();
+  await del.click();
+  await page.getByTestId('dialog-ok').click();
+  await expect(brand).toHaveCount(0);
+  await expect(page.locator('[data-testid="panel-brand"] .media-item').filter({ hasText: 'Logo horizontal' }).getByTestId('brand-del')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

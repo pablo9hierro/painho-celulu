@@ -10,6 +10,7 @@ import { API_PORT, ensureDirs, ffmpegPaths, ROOT } from './config';
 import { getDb, now } from './db';
 import {
   brandFile,
+  trashBrandFile,
   deleteMedia,
   derivedPath,
   getMedia,
@@ -180,6 +181,11 @@ app.get('/api/brand/:file', (req, res) => {
   const f = brandFile(req.params.file);
   if (!f) throw new HttpError(404, 'Arquivo de marca não encontrado.');
   res.sendFile(f, { headers: { 'Cache-Control': 'no-cache' } });
+});
+
+app.delete('/api/brand/:file', (req, res) => {
+  if (!trashBrandFile(req.params.file)) throw new HttpError(404, 'Arquivo de marca não encontrado.');
+  res.json({ ok: true });
 });
 
 app.post(

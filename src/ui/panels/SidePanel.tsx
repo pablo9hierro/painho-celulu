@@ -151,6 +151,32 @@ function MediaPanel({ kinds }: { kinds: MediaAsset['kind'][] }) {
   );
 }
 
+/** logos oficiais embutidas no app (não podem ser excluídas) */
+const isBundledBrand = (m: MediaAsset) => m.id === 'brand:logo-horizontal' || m.id === 'brand:logo-normal';
+
+/** Exclui uma imagem enviada na Marca (some também das logos da moldura/encerramento). */
+async function removeBrandAsset(m: MediaAsset): Promise<boolean> {
+  const used = getEditor().project?.clips.some((c) => ('mediaId' in c && c.mediaId === m.id) || (c.type === 'sponsors' && c.mediaIds.includes(m.id)));
+  const ok = await confirmDialog({
+    title: 'Excluir imagem?',
+    message: used ? `"${m.name}" está em uso neste projeto. Os itens que usam esta imagem ficarão vazios.` : `"${m.name}" será removida das suas imagens.`,
+    confirmLabel: 'Excluir',
+    danger: true,
+  });
+  if (!ok) return false;
+  try {
+    await mediaApi.removeBrand(m.id);
+  } catch (e) {
+    getEditor().notify((e as Error).message, 'error');
+    return false;
+  }
+  for (const kind of ['horizontal', 'round', 'outro'] as const) {
+    if (getFrameLogo(kind) === m.id) setFrameLogo(kind, BUILTIN, getEditor().media);
+  }
+  getEditor().removeMedia(m.id);
+  return true;
+}
+
 function BrandPanel() {
   const all = useEditor((s) => s.media);
   const input = useRef<HTMLInputElement>(null);
@@ -204,6 +230,20 @@ function BrandPanel() {
               <img src={m.url} alt="" draggable={false} />
             </div>
             <div className="media-name ellipsis">{m.name}</div>
+            {!isBundledBrand(m) && (
+              <button
+                className="media-del"
+                aria-label="Excluir"
+                title="Excluir imagem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void removeBrandAsset(m);
+                }}
+                data-testid="brand-del"
+              >
+                <IconTrash />
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -494,7 +534,7 @@ function FrameLogos({ rows = FRAME_ROWS, title = 'Logos da moldura', testId = 'f
         <div key={kind} className="logo-row">
           <span className="muted small">{label}</span>
           <div className="logo-opts">
-            {[{ id: BUILTIN, url: BUILTIN_URL[kind], name: 'Padrão PN' }, ...brand.map((b) => ({ id: b.id, url: b.url, name: b.name }))].map((o) => (
+            {[{ id: BUILTIN, url: BUILTIN_URL[kind], name: 'Padrão PN', asset: null as MediaAsset | null }, ...brand.map((b) => ({ id: b.id, url: b.url, name: b.name, asset: b as MediaAsset | null }))].map((o) => (
               <button
                 key={o.id}
                 className={`logo-opt ${sel[kind] === o.id ? 'on' : ''}`}
@@ -504,6 +544,22 @@ function FrameLogos({ rows = FRAME_ROWS, title = 'Logos da moldura', testId = 'f
               >
                 <img src={o.url} alt="" />
                 {sel[kind] === o.id && <span className="logo-flag">Padrão</span>}
+                {o.asset && !isBundledBrand(o.asset) && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="media-del logo-del"
+                    aria-label="Excluir imagem"
+                    title="Excluir imagem"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (await removeBrandAsset(o.asset!)) setSel({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round'), outro: getFrameLogo('outro') });
+                    }}
+                    data-testid="logo-del"
+                  >
+                    <IconTrash />
+                  </span>
+                )}
               </button>
             ))}
           </div>

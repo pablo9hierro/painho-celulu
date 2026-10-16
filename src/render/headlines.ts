@@ -782,19 +782,21 @@ function encerramento(ctx: C, c: TextClip, { w, h, t }: HeadlineArgs) {
     const s = Math.max(0, ease.outBack(enter)) * (1 + 0.012 * Math.sin(t * Math.PI * 1.4));
     const shx = glitch * w * 0.016 * (rnd(n + 0.5) - 0.5) * 2;
     const shy = glitch * w * 0.01 * (rnd(n + 0.9) - 0.5) * 2;
-    const off = w * (0.006 + 0.028 * glitch);
-    const tint = tinted(img);
     ctx.save();
     ctx.translate(w / 2 + shx, cy + shy);
     ctx.scale(s, s);
-    ctx.globalCompositeOperation = 'screen';
-    ctx.globalAlpha = 0.9;
-    drawSliced(ctx, tint.cyan, -lw / 2 - off, -lh / 2 - off * 0.35, lw, lh, glitch, n, 1);
-    drawSliced(ctx, tint.red, -lw / 2 + off, -lh / 2 + off * 0.35, lw, lh, glitch, n, 2);
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-    ctx.shadowColor = 'rgba(56,160,255,0.55)';
-    ctx.shadowBlur = w * 0.04;
+    // cópias ciano/vermelho só durante o glitch; parada, a logo fica exatamente
+    // como a imagem é (sem contorno, sombra ou brilho em volta)
+    if (glitch > 0.04) {
+      const off = w * 0.028 * glitch;
+      const tint = tinted(img);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.9 * Math.min(1, glitch * 3);
+      drawSliced(ctx, tint.cyan, -lw / 2 - off, -lh / 2 - off * 0.35, lw, lh, glitch, n, 1);
+      drawSliced(ctx, tint.red, -lw / 2 + off, -lh / 2 + off * 0.35, lw, lh, glitch, n, 2);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
     drawSliced(ctx, img, -lw / 2, -lh / 2, lw, lh, glitch, n, 3);
     ctx.restore();
   }

@@ -228,6 +228,10 @@ export const localMedia: MediaService = {
       await new Promise((r) => setTimeout(r, 100));
     }
   },
+  async removeBrand(id) {
+    if (BUNDLED_BRAND.some((b) => b.id === id)) return; // logos oficiais embutidas
+    await localMedia.remove(id);
+  },
   async waveform(url) {
     const data = await idbGet<{ perSec: number; peaks: number[] }>('derived', url);
     return data ?? { perSec: 50, peaks: [] };

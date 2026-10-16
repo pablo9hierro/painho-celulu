@@ -94,6 +94,8 @@ test('320px: velocidade, corte, voz e exportação sem estourar a tela', async (
   await page.getByTestId('file-input').setInputFiles(file);
   const item = page.getByTestId('media-item').filter({ hasText: name });
   await expect(item).toHaveClass(/ready/, { timeout: 60_000 });
+  // lixeira da mídia visível no celular (sem precisar de mouse em cima)
+  await expect(item.locator('.media-del')).toBeVisible();
   await item.tap();
   await page.getByTestId('rail-media').tap();
   await expect(page.getByTestId('clip-video')).toHaveCount(1);
