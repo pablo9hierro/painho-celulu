@@ -1453,13 +1453,24 @@ input[type='range'] {
 }
 .kf-dot {
   position: absolute;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
-  margin-left: -4px;
+  bottom: 3px;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
   background: #ffd23f;
+  border: 1.5px solid #4a3500;
   transform: rotate(45deg);
-  pointer-events: none;
+  cursor: pointer;
+  z-index: 3;
+}
+.kf-dot::after {
+  /* área de toque maior */
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.kf-dot:hover {
+  background: #fff;
 }
 .edge {
   position: absolute;
@@ -2040,4 +2051,34 @@ input[type='range'] {
   width: 18px;
   height: 18px;
   accent-color: var(--accent);
+}
+
+/* ---------- logo da moldura selecionada no preview ---------- */
+.logo-gizmo {
+  border: 2px dashed #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 12px rgba(56, 189, 248, 0.6);
+  pointer-events: none;
+}
+.logo-gizmo-del {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: #c0262d;
+  color: #fff;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.logo-gizmo-del svg {
+  width: 18px;
+  height: 18px;
+}
+.autokey-btn.on {
+  color: #ffd23f;
 }

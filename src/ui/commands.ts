@@ -15,7 +15,7 @@ import {
 } from '../core/factory';
 import { uid } from '../core/id';
 import { clipEnd, deleteClips, duplicateClip, findClip, placeClip, projectDuration, splitClip } from '../core/timeline';
-import { coverWindow, fitVideosToFrame, frameAt, getFrame, insertFrame } from '../core/frames';
+import { coverWindow, FRAME_LOGO_DEFAULT, fitVideosToFrame, frameAt, getFrame, insertFrame } from '../core/frames';
 import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
 import { effectiveTransform, patchClip } from '../core/edit';
@@ -211,6 +211,17 @@ export function splitAtPlayhead() {
 export function deleteSelection(ripple = false) {
   const s = st();
   if (!s.project || !s.selection.length) return;
+  // logo da moldura selecionada no preview: tira só a logo, a moldura fica
+  if (s.frameLogoId && s.selection.length === 1 && s.selection[0] === s.frameLogoId) {
+    const id = s.frameLogoId;
+    s.apply((p) => {
+      const c = p.clips.find((x) => x.id === id);
+      if (!c || c.type !== 'frame') return p;
+      return patchClip(p, id, { logo: { ...(c.logo ?? FRAME_LOGO_DEFAULT), hidden: true } } as Partial<Clip>);
+    });
+    s.set('frameLogoId', null);
+    return;
+  }
   const ids = [...s.selection];
   s.apply((p) => deleteClips(p, ids, ripple));
   s.select([]);

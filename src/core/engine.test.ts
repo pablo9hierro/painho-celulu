@@ -162,6 +162,24 @@ describe('cena e edição', () => {
     expect(evaluateScene(p, 2)[0]!.transform.x).toBeCloseTo(10);
   });
 
+  it('modo Movimento (Pan/Crop): mexer no item sem keyframes cria nó no início e na agulha', () => {
+    let p = createProject('k', 'reel');
+    const t = createTextClip(p, 'plain', 0);
+    p = placeClip(p, t);
+    const x0 = t.transform.x;
+    p = setTransformAt(p, t.id, 2, { ...t.transform, x: 10 }, true);
+    const c = p.clips.find((x) => x.id === t.id)!;
+    expect(c.type !== 'audio' && c.keyframes.map((k) => k.t)).toEqual([0, 2]);
+    expect(evaluateScene(p, 0)[0]!.transform.x).toBeCloseTo(x0);
+    expect(evaluateScene(p, 2)[0]!.transform.x).toBeCloseTo(10);
+    expect(evaluateScene(p, 1)[0]!.transform.x).not.toBeCloseTo(x0); // se move entre os nós
+    // sem o modo, continua mudando o item inteiro
+    let q = placeClip(createProject('q', 'reel'), createTextClip(p, 'plain', 0));
+    const id = q.clips[0]!.id;
+    q = setTransformAt(q, id, 2, { ...(q.clips[0] as { transform: Transform }).transform, x: 10 });
+    expect((q.clips[0] as { keyframes: unknown[] }).keyframes).toHaveLength(0);
+  });
+
   it('moldura é item normal: entra na agulha, pode haver várias e enquadra o vídeo do trecho', () => {
     let p = createProject('m', 'reel');
     p = placeClip(p, createVideoClip(p, { ...video, duration: 20 }, 0), p.tracks[0]!.id);

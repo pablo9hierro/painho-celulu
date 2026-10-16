@@ -28,6 +28,10 @@ interface EditorState {
   previewFull: boolean;
   /** clipe em modo de corte (alças de corte no palco) */
   cropId: string | null;
+  /** moldura cuja logo do cabeçalho está selecionada no preview */
+  frameLogoId: string | null;
+  /** modo "Movimento" (Pan/Crop do Vegas): mexer no item grava keyframe na agulha */
+  autoKey: boolean;
   tool: Tool;
   panel: Panel | null;
   editingTextId: string | null;
@@ -61,6 +65,23 @@ interface EditorState {
   notify(text: string, kind?: 'info' | 'error'): void;
 }
 
+function loadAutoKey(): boolean {
+  try {
+    return localStorage.getItem('pn-autokey') === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setAutoKey(on: boolean) {
+  useEditor.getState().set('autoKey', on);
+  try {
+    localStorage.setItem('pn-autokey', on ? '1' : '0');
+  } catch {
+    /* sem armazenamento */
+  }
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
   project: null,
   media: {},
@@ -72,6 +93,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   safeZones: false,
   previewFull: false,
   cropId: null,
+  frameLogoId: null,
+  autoKey: loadAutoKey(),
   tool: 'select',
   panel: 'media',
   editingTextId: null,
@@ -96,7 +119,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
   select: (ids, additive) =>
     set((s) => {
-      if (!additive) return { selection: ids };
+      if (!additive) return { selection: ids, frameLogoId: null };
       const next = new Set(s.selection);
       for (const id of ids) {
         if (next.has(id)) next.delete(id);

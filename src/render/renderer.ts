@@ -4,7 +4,7 @@
  */
 import type { Adjust, BlurClip, Crop, FrameClip, ImageClip, Project, ShapeClip, SponsorsClip, VideoClip } from '../core/model';
 import { evaluateScene, type SceneItem } from '../core/scene';
-import { getFrame, frameWindow, type FrameDef } from '../core/frames';
+import { getFrame, frameWindow, type FrameDef, frameLogoRect } from '../core/frames';
 import { drawHandle, drawHeadline, drawTicker } from './headlines';
 import { brandImage, brandVersion, drawLogo, LOGO_RATIO } from './brandAssets';
 import { applyFont } from './text';
@@ -111,12 +111,12 @@ function drawItem(ctx: C, project: Project, it: SceneItem, src: MediaSources, op
   switch (clip.type) {
     case 'video': {
       const frame = src.video(clip, it.mediaTime);
-      if (frame) drawMedia(ctx, frame, w, h, clip.adjust, clip.flipH, clip.crop);
+      if (frame) drawMedia(ctx, frame, w, h, clip.adjust, clip.flipH, clip.crop, src.size(clip.mediaId));
       break;
     }
     case 'image': {
       const img = src.image(clip.mediaId);
-      if (img) drawMedia(ctx, img, w, h, (clip as ImageClip).adjust, clip.flipH, (clip as ImageClip).crop);
+      if (img) drawMedia(ctx, img, w, h, (clip as ImageClip).adjust, clip.flipH, (clip as ImageClip).crop, src.size(clip.mediaId));
       break;
     }
     case 'text': {
@@ -179,6 +179,15 @@ function drawFrame(ctx: C, clip: FrameClip, W: number, H: number, t: number) {
   ctx.drawImage(frameLayer(ctx, def, W, H, 'bg'), 0, 0, W, H);
   if (!full) drawFrameWatermark(ctx, win, W, H, t);
   ctx.drawImage(frameLayer(ctx, def, W, H, 'fg'), 0, 0, W, H);
+  // logo do cabeçalho: ao vivo, com posição/opacidade ajustadas no preview
+  const lr = frameLogoRect(clip, W, H, LOGO_RATIO.horizontal);
+  const lo = clip.logo?.opacity ?? 1;
+  if (lr && lo > 0) {
+    ctx.save();
+    ctx.globalAlpha *= lo;
+    drawLogo(ctx, lr.x, lr.y, lr.h);
+    ctx.restore();
+  }
   if (def.ticker) {
     const th = W * 0.075;
     ctx.save();
@@ -288,7 +297,7 @@ function drawFrameBackground(ctx: C, def: FrameDef, W: number, H: number) {
   ctx.restore();
 }
 
-/** Frente da moldura: fios de acabamento, logo do cabeçalho e @perfil. */
+/** Frente da moldura: fios de acabamento e @perfil (a logo é desenhada ao vivo em drawFrame). */
 function drawFrameForeground(ctx: C, def: FrameDef, W: number, H: number) {
   const win = frameWindow(def, W, H);
   const full = win.w >= W - 0.5 && win.h >= H - 0.5;
@@ -305,18 +314,6 @@ function drawFrameForeground(ctx: C, def: FrameDef, W: number, H: number) {
     ctx.fillStyle = '#04101f';
     ctx.fillRect(win.x, win.y - t2 - t1, win.w, t1);
     ctx.fillRect(win.x, win.y + win.h + t2, win.w, t1);
-  }
-  if (def.logoFill && win.y > 0) {
-    // logo grande preenchendo todo o cabeçalho acima da janela do vídeo
-    const boxW = W * 0.94;
-    const boxH = win.y * 0.86;
-    const lh = Math.min(boxH, boxW / LOGO_RATIO.horizontal);
-    const lw = lh * LOGO_RATIO.horizontal;
-    drawLogo(ctx, (W - lw) / 2, (win.y - lh) / 2, lh);
-  } else {
-    const lw = def.logo.w * W;
-    const lh = lw / LOGO_RATIO.horizontal;
-    drawLogo(ctx, def.logo.cx * W - lw / 2, def.logo.cy * H - lh / 2, lh);
   }
   if (def.handle !== null) {
     const hh = W * 0.075;
@@ -336,20 +333,41 @@ function sourceSize(img: CanvasImageSource): { w: number; h: number } {
   return { w: anyImg.width, h: anyImg.height };
 }
 
-function drawMedia(ctx: C, img: CanvasImageSource, w: number, h: number, adjust: Adjust, flip: boolean, crop?: Crop) {
+/**
+ * Desenha a mídia na caixa do item SEM distorcer: mantém a proporção real
+ * (`display` = tamanho de exibição da mídia, com rotação/pixel já aplicados) e
+ * preenche a caixa cortando o excesso, como o TikTok. Com a caixa na proporção
+ * da mídia (o normal), o resultado é a mídia inteira.
+ */
+function drawMedia(ctx: C, img: CanvasImageSource, w: number, h: number, adjust: Adjust, flip: boolean, crop?: Crop, display?: { w: number; h: number } | null) {
   const f = adjustFilter(adjust);
   if (f !== 'none') ctx.filter = f;
   if (flip) ctx.scale(-1, 1);
-  if (crop && (crop.l || crop.t || crop.r || crop.b)) {
-    // corte: desenha só a parte não cortada da mídia, ocupando a caixa do elemento
-    const s = sourceSize(img);
-    const sx = crop.l * s.w;
-    const sy = crop.t * s.h;
-    const sw = Math.max(1, (1 - crop.l - crop.r) * s.w);
-    const sh = Math.max(1, (1 - crop.t - crop.b) * s.h);
-    ctx.drawImage(img, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
-  } else {
-    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  const s = sourceSize(img);
+  if (s.w > 0 && s.h > 0 && w > 0 && h > 0) {
+    const d = display && display.w > 0 && display.h > 0 ? display : s;
+    // pixels da fonte por unidade de exibição (corrige pixel não quadrado)
+    const fx = s.w / d.w;
+    const fy = s.h / d.h;
+    const c = crop ?? { l: 0, t: 0, r: 0, b: 0 };
+    let cx = c.l * d.w;
+    let cy = c.t * d.h;
+    let cw = Math.max(1e-3, (1 - c.l - c.r) * d.w);
+    let ch = Math.max(1e-3, (1 - c.t - c.b) * d.h);
+    const box = w / h;
+    const reg = cw / ch;
+    if (Math.abs(reg - box) / box > 0.002) {
+      if (reg > box) {
+        const nw = ch * box;
+        cx += (cw - nw) / 2;
+        cw = nw;
+      } else {
+        const nh = cw / box;
+        cy += (ch - nh) / 2;
+        ch = nh;
+      }
+    }
+    ctx.drawImage(img, cx * fx, cy * fy, Math.max(1, cw * fx), Math.max(1, ch * fy), -w / 2, -h / 2, w, h);
   }
   ctx.filter = 'none';
 }

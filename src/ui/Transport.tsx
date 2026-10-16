@@ -1,7 +1,7 @@
-import { useEditor, getEditor } from '../state/store';
+import { useEditor, getEditor, setAutoKey } from '../state/store';
 import { projectDuration } from '../core/timeline';
 import { seek, splitAtPlayhead, togglePlay } from './commands';
-import { IconEnd, IconExitFullscreen, IconFullscreen, IconPause, IconPlay, IconSafe, IconSettings, IconSplit, IconStart } from './icons';
+import { IconEnd, IconExitFullscreen, IconFullscreen, IconKeyframe, IconPause, IconPlay, IconSafe, IconSettings, IconSplit, IconStart } from './icons';
 
 export function formatTime(t: number, fps = 30) {
   const m = Math.floor(t / 60);
@@ -16,6 +16,7 @@ export function Transport({ onOpenInspector }: { onOpenInspector: () => void }) 
   const fps = useEditor((s) => s.project?.fps ?? 30);
   const duration = useEditor((s) => (s.project ? projectDuration(s.project) : 0));
   const safeZones = useEditor((s) => s.safeZones);
+  const autoKey = useEditor((s) => s.autoKey);
   const hasSelection = useEditor((s) => s.selection.length > 0);
   const full = useEditor((s) => s.previewFull);
 
@@ -44,6 +45,21 @@ export function Transport({ onOpenInspector }: { onOpenInspector: () => void }) 
           <>
             <button className="icon-btn transport-split" onClick={splitAtPlayhead} title="Dividir na agulha (S)" aria-label="Dividir">
               <IconSplit />
+            </button>
+            <button
+              className={`icon-btn autokey-btn ${autoKey ? 'on' : ''}`}
+              onClick={() => {
+                setAutoKey(!autoKey);
+                getEditor().notify(
+                  autoKey ? 'Movimento desligado: mexer no item muda ele no clipe todo.' : 'Movimento ligado: ponha a agulha num ponto e mexa no item — ele se move até ali (nós ◆ na timeline).',
+                );
+              }}
+              title="Movimento (como o Pan/Crop do Vegas): mexer no item grava um nó na agulha"
+              aria-label="Movimento"
+              aria-pressed={autoKey}
+              data-testid="autokey"
+            >
+              <IconKeyframe />
             </button>
             <button
               className={`icon-btn ${safeZones ? 'on' : ''}`}

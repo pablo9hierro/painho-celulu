@@ -28,9 +28,11 @@ import { effectiveTransform, patchClip, setTransformAt } from '../../core/edit';
 import { renderFrame } from '../../render/renderer';
 import { preview } from '../../engine/preview';
 import { getEditor, useEditor } from '../../state/store';
-import { addBlur, togglePlay } from '../commands';
+import { addBlur, deleteSelection, togglePlay } from '../commands';
+import { FRAME_LOGO_DEFAULT, frameLogoRect, type FrameLogoState } from '../../core/frames';
+import { IconTrash } from '../icons';
 import { getPreset } from '../../core/presets';
-import { ensureBrandAssets, onBrandLoaded } from '../../render/brandAssets';
+import { ensureBrandAssets, LOGO_RATIO, onBrandLoaded } from '../../render/brandAssets';
 import { TextEditOverlay } from './TextEditOverlay';
 
 let liveCanvas: HTMLCanvasElement | null = null;
@@ -56,6 +58,7 @@ type Gesture =
   | { kind: 'resize'; id: string; handle: Handle; start: { x: number; y: number }; base: Transform }
   | { kind: 'rotate'; id: string; base: Transform; startAngle: number }
   | { kind: 'crop'; id: string; edge: CropEdge; start: { x: number; y: number }; base: Transform; crop: CropValue }
+  | { kind: 'logo'; id: string; start: { x: number; y: number }; base: FrameLogoState; moved: boolean }
   | { kind: 'pinch'; id: string; base: Transform; d0: number; a0: number; m0: { x: number; y: number } }
   | { kind: 'draw'; start: { x: number; y: number }; cur: { x: number; y: number } };
 
@@ -166,7 +169,20 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
 
   const lockedTracks = new Set(project.tracks.filter((t) => t.locked).map((t) => t.id));
   // a moldura cobre o quadro todo: não participa da seleção no canvas (é selecionada pela timeline)
-  const items = evaluateScene(project, time).filter((it) => !lockedTracks.has(it.clip.trackId) && it.clip.type !== 'frame');
+  const scene = evaluateScene(project, time);
+  const items = scene.filter((it) => !lockedTracks.has(it.clip.trackId) && it.clip.type !== 'frame');
+  const frameLogoId = useEditor((s) => s.frameLogoId);
+
+  /** logo do cabeçalho da moldura sob o ponto (clicável no preview, sem item na timeline) */
+  const frameLogoAt = (pt: { x: number; y: number }) => {
+    for (let i = scene.length - 1; i >= 0; i--) {
+      const c = scene[i]!.clip;
+      if (c.type !== 'frame' || lockedTracks.has(c.trackId)) continue;
+      const r = frameLogoRect(c, project.width, project.height, LOGO_RATIO.horizontal);
+      if (r && pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h) return { clip: c, index: i, rect: r };
+    }
+    return null;
+  };
 
   const hitAt = (pt: { x: number; y: number }): VisualClip | null => {
     const pad = 4 / scale;
@@ -220,6 +236,15 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
     }
 
     const hit = hitAt(pt);
+    // logo da moldura: vence se nenhum item acima dela foi tocado
+    const lg = frameLogoAt(pt);
+    if (lg && (!hit || scene.findIndex((it) => it.clip.id === hit.id) < lg.index)) {
+      s.select([lg.clip.id]);
+      s.set('frameLogoId', lg.clip.id);
+      s.beginGesture();
+      gesture.current = { kind: 'logo', id: lg.clip.id, start: pt, base: lg.clip.logo ?? FRAME_LOGO_DEFAULT, moved: false };
+      return;
+    }
     if (!hit) {
       s.select([]);
       gesture.current = null;
@@ -283,7 +308,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
         x: g.base.x + (m.x - g.m0.x),
         y: g.base.y + (m.y - g.m0.y),
       };
-      s.updateGesture((base) => setTransformAt(base, g.id, s.time, tr));
+      s.updateGesture((base) => setTransformAt(base, g.id, s.time, tr, s.autoKey));
       return;
     }
     if (g.kind === 'move') {
@@ -304,7 +329,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       } else setGuides([]);
       s.updateGesture((base) => {
         let p = base;
-        for (const [id, tr] of g.bases) p = setTransformAt(p, id, s.time, { ...tr, x: tr.x + ox, y: tr.y + oy });
+        for (const [id, tr] of g.bases) p = setTransformAt(p, id, s.time, { ...tr, x: tr.x + ox, y: tr.y + oy }, s.autoKey);
         return p;
       });
       return;
@@ -315,18 +340,26 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       const prefersAspect = !!clip && (MEDIA_TYPES.has(clip.type) || clip.type === 'text');
       const keepAspect = isCorner && (prefersAspect ? !e.shiftKey : e.shiftKey);
       const tr = resizeTransform(g.base, g.handle, pt.x - g.start.x, pt.y - g.start.y, { keepAspect, fromCenter: e.altKey, minSize: 10 });
-      s.updateGesture((base) => setTransformAt(base, g.id, s.time, tr));
+      s.updateGesture((base) => setTransformAt(base, g.id, s.time, tr, s.autoKey));
       return;
     }
     if (g.kind === 'rotate') {
       const rot = rotationFromPointer(g.base, pt.x, pt.y, g.startAngle, g.base.rotation, snapping);
-      s.updateGesture((base) => setTransformAt(base, g.id, s.time, { ...g.base, rotation: rot }));
+      s.updateGesture((base) => setTransformAt(base, g.id, s.time, { ...g.base, rotation: rot }, s.autoKey));
+    }
+    if (g.kind === 'logo') {
+      const dx = pt.x - g.start.x;
+      const dy = pt.y - g.start.y;
+      if (!g.moved && Math.hypot(dx, dy) * scale < 3) return;
+      g.moved = true;
+      s.updateGesture((base) => patchClip(base, g.id, { logo: { ...g.base, dx: g.base.dx + dx, dy: g.base.dy + dy } } as Partial<VisualClip>));
+      return;
     }
     if (g.kind === 'crop') {
       // deslocamento do ponteiro no eixo local do item
       const d = rotate(pt.x - g.start.x, pt.y - g.start.y, -g.base.rotation);
       const r = dragCrop(g.base, g.crop, g.edge, g.edge === 'l' || g.edge === 'r' ? d.x : d.y);
-      s.updateGesture((base) => patchClip(setTransformAt(base, g.id, s.time, r.transform), g.id, { crop: r.crop } as Partial<VisualClip>));
+      s.updateGesture((base) => patchClip(setTransformAt(base, g.id, s.time, r.transform, s.autoKey), g.id, { crop: r.crop } as Partial<VisualClip>));
     }
   };
 
@@ -392,7 +425,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       const k = Math.exp(-e.deltaY * 0.0035);
       const tr = effectiveTransform(clip, s.time);
       s.apply(
-        (p) => setTransformAt(p, clip.id, s.time, { ...tr, width: Math.max(8, tr.width * k), height: Math.max(8, tr.height * k) }),
+        (p) => setTransformAt(p, clip.id, s.time, { ...tr, width: Math.max(8, tr.width * k), height: Math.max(8, tr.height * k) }, s.autoKey),
         `wheel-${clip.id}`,
       );
     };
@@ -429,6 +462,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
           onHandle={(e, h) => startHandle(e, it.clip.id, h)}
         />
       ))}
+      {frameLogoId && <FrameLogoGizmo id={frameLogoId} project={project} time={time} scale={scale} />}
       {guides.map((g, i) => (
         <div
           key={i}
@@ -449,6 +483,31 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       )}
       {editing && editing.clip.type === 'text' && <TextEditOverlay clip={editing.clip} tr={editing.transform} scale={scale} />}
       {tool !== 'select' && <div className="stage-hint">Arraste sobre a imagem para desenhar a área de desfoque · Esc cancela</div>}
+    </div>
+  );
+}
+
+/** Contorno da logo da moldura selecionada no preview, com lixeira para tirá-la. */
+function FrameLogoGizmo({ id, project, time, scale }: { id: string; project: Project; time: number; scale: number }) {
+  const c = project.clips.find((x) => x.id === id);
+  if (!c || c.type !== 'frame' || time < c.start || time >= c.start + c.duration) return null;
+  const r = frameLogoRect(c, project.width, project.height, LOGO_RATIO.horizontal);
+  if (!r) return null;
+  return (
+    <div className="gizmo logo-gizmo" style={{ left: r.x * scale, top: r.y * scale, width: r.w * scale, height: r.h * scale }} data-testid="frame-logo-gizmo">
+      <button
+        className="logo-gizmo-del"
+        aria-label="Tirar a logo da moldura"
+        title="Tirar a logo da moldura"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          deleteSelection();
+        }}
+        data-testid="frame-logo-del"
+      >
+        <IconTrash />
+      </button>
     </div>
   );
 }

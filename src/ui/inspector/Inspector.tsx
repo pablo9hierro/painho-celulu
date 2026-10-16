@@ -7,7 +7,7 @@ import type { BlurClip, Clip, FrameClip, ImageClip, Project, ShapeClip, Sponsors
 import { removeCrop } from '../../core/geometry';
 import { FORMATS, isVisual } from '../../core/model';
 import { getPreset } from '../../core/presets';
-import { getFrame } from '../../core/frames';
+import { FRAME_LOGO_DEFAULT, getFrame, type FrameLogoState } from '../../core/frames';
 import { BRAND_SWATCHES, PN } from '../../core/brand';
 import { clearKeyframes, effectiveTransform, patchClip, setTransformAt, toggleKeyframeAt } from '../../core/edit';
 import { setSpeed, trimEnd } from '../../core/timeline';
@@ -192,7 +192,42 @@ function FrameSection({ clip }: { clip: FrameClip }) {
           <textarea className="input" rows={2} value={clip.text} onChange={(e) => patch(clip.id, { text: e.target.value } as Partial<FrameClip>, `ft-${clip.id}`)} />
         </label>
       )}
+      <FrameLogoControls clip={clip} />
     </Section>
+  );
+}
+
+/** Logo do cabeçalho da moldura: opacidade, tirar/voltar e posição original. */
+function FrameLogoControls({ clip }: { clip: FrameClip }) {
+  const lg = clip.logo ?? FRAME_LOGO_DEFAULT;
+  const setLogo = (v: Partial<FrameLogoState>, merge?: string) => patch(clip.id, { logo: { ...lg, ...v } } as Partial<FrameClip>, merge);
+  const moved = lg.dx !== 0 || lg.dy !== 0;
+  return (
+    <div className="field" data-testid="frame-logo-controls">
+      <span>Logo da moldura</span>
+      <p className="hint">Toque na logo no vídeo para selecionar: arraste para mover ou use a lixeira para tirar.</p>
+      {!lg.hidden && (
+        <Slider
+          label="Opacidade"
+          value={lg.opacity}
+          min={0}
+          max={1}
+          step={0.01}
+          onChange={(v) => setLogo({ opacity: v }, `flo-${clip.id}`)}
+          format={(v) => `${Math.round(v * 100)}%`}
+        />
+      )}
+      <div className="row-gap wrap">
+        <button className="btn sm" onClick={() => setLogo({ hidden: !lg.hidden })} data-testid="frame-logo-toggle">
+          {lg.hidden ? 'Mostrar logo' : 'Tirar logo'}
+        </button>
+        {moved && !lg.hidden && (
+          <button className="btn sm ghost" onClick={() => setLogo({ dx: 0, dy: 0 })}>
+            Voltar ao lugar
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -481,7 +516,7 @@ function TransformSection({ clip, time }: { clip: VisualClip; time: number }) {
   const local = time - clip.start;
   const active = local >= 0 && local <= clip.duration;
   const onKf = clip.keyframes.some((k) => Math.abs(k.t - local) < 1 / 60);
-  const set = (k: keyof typeof tr) => (v: number, merge: string) => apply((p) => setTransformAt(p, clip.id, time, { ...tr, [k]: v }), `${merge}-${clip.id}`);
+  const set = (k: keyof typeof tr) => (v: number, merge: string) => apply((p) => setTransformAt(p, clip.id, time, { ...tr, [k]: v }, getEditor().autoKey), `${merge}-${clip.id}`);
   return (
     <Section
       title="Posição e tamanho"

@@ -196,6 +196,15 @@ export const FrameClipSchema = z.object({
   frame: z.string(),
   /** texto do letreiro, quando a moldura tem letreiro */
   text: z.string(),
+  /** ajustes da logo do cabeçalho feitos no preview (posição, opacidade, escondida) */
+  logo: z
+    .object({
+      hidden: z.boolean(),
+      dx: num,
+      dy: num,
+      opacity: num.min(0).max(1),
+    })
+    .optional(),
 });
 
 export const ClipSchema = z.discriminatedUnion('type', [

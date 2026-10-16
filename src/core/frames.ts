@@ -92,6 +92,36 @@ export function frameWindow(def: FrameDef, W: number, H: number) {
   return { x: def.window.x * W, y: def.window.y * H, w: def.window.w * W, h: def.window.h * H };
 }
 
+export interface FrameLogoState {
+  hidden: boolean;
+  dx: number;
+  dy: number;
+  opacity: number;
+}
+export const FRAME_LOGO_DEFAULT: FrameLogoState = { hidden: false, dx: 0, dy: 0, opacity: 1 };
+
+/** Retângulo padrão da logo do cabeçalho (`ratio` = largura/altura da logo horizontal). */
+export function frameLogoBox(def: FrameDef, W: number, H: number, ratio: number) {
+  const win = frameWindow(def, W, H);
+  if (def.logoFill && win.y > 0) {
+    // logo grande preenchendo todo o cabeçalho acima da janela do vídeo
+    const h = Math.min(win.y * 0.86, (W * 0.94) / ratio);
+    const w = h * ratio;
+    return { x: (W - w) / 2, y: (win.y - h) / 2, w, h };
+  }
+  const w = def.logo.w * W;
+  const h = w / ratio;
+  return { x: def.logo.cx * W - w / 2, y: def.logo.cy * H - h / 2, w, h };
+}
+
+/** Onde a logo da moldura está (com o ajuste do usuário); null se escondida. */
+export function frameLogoRect(clip: { frame: string; logo?: FrameLogoState }, W: number, H: number, ratio: number) {
+  const st = clip.logo ?? FRAME_LOGO_DEFAULT;
+  if (st.hidden) return null;
+  const b = frameLogoBox(getFrame(clip.frame), W, H, ratio);
+  return { x: b.x + st.dx, y: b.y + st.dy, w: b.w, h: b.h };
+}
+
 /** Enquadra uma mídia (proporção `ratio`) cobrindo a janela da moldura. */
 export function coverWindow(def: FrameDef, W: number, H: number, ratio: number): Transform {
   const win = frameWindow(def, W, H);

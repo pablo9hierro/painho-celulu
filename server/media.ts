@@ -173,8 +173,12 @@ export async function processMedia(id: string): Promise<void> {
   if (!video) throw new Error('Arquivo sem trilha de vídeo ou áudio reconhecível.');
 
   const rot = rotationOf(video);
-  const w = rot ? (video.height ?? 0) : (video.width ?? 0);
-  const h = rot ? (video.width ?? 0) : (video.height ?? 0);
+  // pixel não quadrado (SAR): a largura de exibição é largura × SAR
+  const [sn, sd] = (video.sample_aspect_ratio ?? '1:1').split(':').map(Number);
+  const sar = sn && sd ? sn / sd : 1;
+  const dispW = Math.round((video.width ?? 0) * (sar > 0.1 && sar < 10 ? sar : 1));
+  const w = rot ? (video.height ?? 0) : dispW;
+  const h = rot ? dispW : (video.height ?? 0);
   const fps = parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate) || 30;
   update(id, { kind: 'video', duration, width: w, height: h, fps, has_audio: audio ? 1 : 0 });
 

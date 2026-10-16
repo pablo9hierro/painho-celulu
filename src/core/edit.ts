@@ -15,12 +15,20 @@ export function patchClip(p: Project, id: string, patch: Partial<Clip>): Project
  * Define a transformação de um clipe no instante `t` da timeline. Se o clipe já
  * tem keyframes, grava/atualiza um keyframe naquele instante; senão altera a base.
  */
-export function setTransformAt(p: Project, id: string, t: number, tr: Transform): Project {
+/**
+ * Grava a transformação no instante `t`. Com keyframes, cria/atualiza o nó na
+ * agulha. Com `auto` (modo Movimento, como o Event Pan/Crop do Vegas), um item
+ * ainda sem keyframes ganha um nó no início com a posição antiga e outro na
+ * agulha com a nova — o item passa a se mover entre eles.
+ */
+export function setTransformAt(p: Project, id: string, t: number, tr: Transform, auto = false): Project {
   return updateClip<VisualClip>(p, id, (c) => {
     if (!isVisual(c)) return c;
-    if (c.keyframes.length) {
-      const local = Math.min(c.duration, Math.max(0, t - c.start));
-      return { ...c, keyframes: upsertKeyframe(c.keyframes, local, tr) };
+    const local = Math.min(c.duration, Math.max(0, t - c.start));
+    if (c.keyframes.length) return { ...c, keyframes: upsertKeyframe(c.keyframes, local, tr) };
+    if (auto) {
+      const first = upsertKeyframe([], 0, local > 1 / 60 ? c.transform : tr);
+      return { ...c, transform: tr, keyframes: local > 1 / 60 ? upsertKeyframe(first, local, tr) : first };
     }
     return { ...c, transform: tr };
   });

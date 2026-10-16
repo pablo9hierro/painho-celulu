@@ -708,7 +708,21 @@ const ClipView = memo(function ClipView({
         <span className="clip-name">{label}</span>
       </div>
       {clip.type !== 'audio' &&
-        clip.keyframes.map((k, i) => <span key={i} className="kf-dot" style={{ left: k.t * zoom }} />)}
+        clip.keyframes.map((k, i) => (
+          <span
+            key={i}
+            className="kf-dot"
+            style={{ left: k.t * zoom }}
+            title={`Nó em ${(clip.start + k.t).toFixed(2)} s — toque para ir até ele`}
+            onPointerDown={(e) => {
+              // tocar no nó leva a agulha até ele (sem arrastar o clipe)
+              e.stopPropagation();
+              getEditor().select([clip.id]);
+              seek(clip.start + k.t);
+            }}
+            data-testid="kf-dot"
+          />
+        ))}
       <span className="edge edge-l" data-edge="l" />
       <span className="edge edge-r" data-edge="r" />
     </div>

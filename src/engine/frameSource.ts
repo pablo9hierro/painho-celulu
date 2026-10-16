@@ -79,7 +79,9 @@ export async function prepareFrameSource(project: Project, media: Record<string,
       image: (id) => images.get(id) ?? null,
       size: (id) => {
         const i = images.get(id);
-        return i ? { w: i.naturalWidth, h: i.naturalHeight } : null;
+        if (i) return { w: i.naturalWidth, h: i.naturalHeight };
+        const m = media[id];
+        return m && m.width && m.height ? { w: m.width, h: m.height } : null;
       },
     },
     async seek(t) {
