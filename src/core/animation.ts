@@ -1,4 +1,4 @@
-import type { Animation, Keyframe, Transform } from './model';
+import type { Animation, Crop, Keyframe, Transform } from './model';
 
 export const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -140,8 +140,40 @@ export function upsertKeyframe(
   t: number,
   tr: Transform,
   tolerance = 1 / 60,
+  crop?: Crop,
 ): Keyframe[] {
   const next = keyframes.filter((k) => Math.abs(k.t - t) > tolerance);
-  next.push({ ...tr, t, easing: 'ease-in-out' });
+  const node: Keyframe = { x: tr.x, y: tr.y, width: tr.width, height: tr.height, rotation: tr.rotation, opacity: tr.opacity, t, easing: 'ease-in-out' };
+  if (crop) node.crop = { ...crop };
+  next.push(node);
   return next.sort((a, b) => a.t - b.t);
+}
+
+const NO_CROP_VALUE: Crop = { l: 0, t: 0, r: 0, b: 0 };
+const CROP_FIELDS = ['l', 't', 'r', 'b'] as const;
+
+/** Corte efetivo no instante (nós com corte interpolam como o Pan/Crop do Vegas). */
+export function cropAt(base: Crop | undefined, keyframes: Keyframe[], localT: number): Crop | undefined {
+  if (!keyframes.some((k) => k.crop)) return base;
+  const z = base ?? NO_CROP_VALUE;
+  const kfs = [...keyframes].sort((a, b) => a.t - b.t);
+  const get = (k: Keyframe) => k.crop ?? z;
+  const first = kfs[0]!;
+  const last = kfs[kfs.length - 1]!;
+  if (localT <= first.t) return get(first);
+  if (localT >= last.t) return get(last);
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const a = kfs[i]!;
+    const b = kfs[i + 1]!;
+    if (localT >= a.t && localT <= b.t) {
+      const raw = b.t === a.t ? 1 : (localT - a.t) / (b.t - a.t);
+      const t = ease[b.easing](raw);
+      const ca = get(a);
+      const cb = get(b);
+      const out = { ...NO_CROP_VALUE };
+      for (const f of CROP_FIELDS) out[f] = lerp(ca[f], cb[f], t);
+      return out;
+    }
+  }
+  return get(last);
 }

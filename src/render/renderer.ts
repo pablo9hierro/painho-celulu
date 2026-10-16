@@ -9,6 +9,7 @@ import { drawHandle, drawHeadline, drawTicker } from './headlines';
 import { brandImage, brandVersion, drawLogo, LOGO_RATIO } from './brandAssets';
 import { applyFont } from './text';
 import { FONTS, PN } from '../core/brand';
+import { cropAt } from '../core/animation';
 
 type C = CanvasRenderingContext2D;
 
@@ -111,12 +112,12 @@ function drawItem(ctx: C, project: Project, it: SceneItem, src: MediaSources, op
   switch (clip.type) {
     case 'video': {
       const frame = src.video(clip, it.mediaTime);
-      if (frame) drawMedia(ctx, frame, w, h, clip.adjust, clip.flipH, clip.crop, src.size(clip.mediaId));
+      if (frame) drawMedia(ctx, frame, w, h, clip.adjust, clip.flipH, cropAt(clip.crop, clip.keyframes, it.localT), src.size(clip.mediaId));
       break;
     }
     case 'image': {
       const img = src.image(clip.mediaId);
-      if (img) drawMedia(ctx, img, w, h, (clip as ImageClip).adjust, clip.flipH, (clip as ImageClip).crop, src.size(clip.mediaId));
+      if (img) drawMedia(ctx, img, w, h, (clip as ImageClip).adjust, clip.flipH, cropAt((clip as ImageClip).crop, clip.keyframes, it.localT), src.size(clip.mediaId));
       break;
     }
     case 'text': {

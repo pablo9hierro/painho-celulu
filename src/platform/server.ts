@@ -3,6 +3,8 @@
  */
 import type { ExportSettings, Exporter, MediaService, ProjectStore } from './types';
 import { runExport } from '../engine/exporter';
+import { BUNDLED_LOGOS } from './bundledBrand';
+import type { MediaAsset } from '../core/model';
 
 export interface ExportInfo {
   id: string;
@@ -86,7 +88,7 @@ export const serverMedia: MediaService = {
   remove: async (id) => {
     await req(`/api/media/${id}`, { method: 'DELETE' });
   },
-  brand: () => req('/api/brand'),
+  brand: async () => [...BUNDLED_LOGOS, ...(await req<MediaAsset[]>('/api/brand'))],
   uploadBrand: async (file) => {
     await uploadXhr(`/api/brand?name=${encodeURIComponent(file.name)}`, file);
   },

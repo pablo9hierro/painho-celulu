@@ -43,10 +43,21 @@ export const TransformSchema = z.object({
 });
 export type Transform = z.infer<typeof TransformSchema>;
 
+/** Corte das bordas da mídia, em frações (0 = sem corte) */
+export const CropSchema = z.object({
+  l: num.min(0).max(0.95),
+  t: num.min(0).max(0.95),
+  r: num.min(0).max(0.95),
+  b: num.min(0).max(0.95),
+});
+export type Crop = z.infer<typeof CropSchema>;
+
 export const KeyframeSchema = TransformSchema.extend({
   /** segundos relativos ao início do clipe */
   t: num.min(0),
   easing: z.enum(EASINGS),
+  /** corte da mídia neste nó (Pan/Crop); ausente = corte base do clipe */
+  crop: CropSchema.optional(),
 });
 export type Keyframe = z.infer<typeof KeyframeSchema>;
 
@@ -95,14 +106,6 @@ const AudioProps = {
   voice: z.enum(['normal', 'high', 'low']).optional(),
 };
 
-/** Corte das bordas da mídia, em frações (0 = sem corte) */
-export const CropSchema = z.object({
-  l: num.min(0).max(0.95),
-  t: num.min(0).max(0.95),
-  r: num.min(0).max(0.95),
-  b: num.min(0).max(0.95),
-});
-export type Crop = z.infer<typeof CropSchema>;
 
 export const VideoClipSchema = z.object({
   type: z.literal('video'),

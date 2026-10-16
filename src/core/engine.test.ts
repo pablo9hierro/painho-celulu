@@ -5,9 +5,9 @@ import { dragCrop, hitTest, NO_CROP, removeCrop, resizeTransform, rotate, snapPo
 import { evaluateScene, frameTimes } from './scene';
 import { createBlurClip, createProject, createTextClip, createVideoClip, fitContain, fitCover } from './factory';
 import { placeClip } from './timeline';
-import { setTransformAt, toggleKeyframeAt } from './edit';
+import { effectiveCrop, setCropAt, setTransformAt, toggleKeyframeAt } from './edit';
 import { insertFrame, FRAMES, frameWindow, getFrame } from './frames';
-import type { MediaAsset, Transform } from './model';
+import type { MediaAsset, Transform, VisualClip } from './model';
 import { ProjectSchema } from './model';
 
 const T: Transform = { x: 100, y: 100, width: 200, height: 100, rotation: 0, opacity: 1 };
@@ -178,6 +178,25 @@ describe('cena e edição', () => {
     const id = q.clips[0]!.id;
     q = setTransformAt(q, id, 2, { ...(q.clips[0] as { transform: Transform }).transform, x: 10 });
     expect((q.clips[0] as { keyframes: unknown[] }).keyframes).toHaveLength(0);
+  });
+
+  it('Pan/Crop: o corte vira nó e anima entre os nós', () => {
+    let p = createProject('c', 'reel');
+    const v = createVideoClip(p, { ...video, duration: 10 }, 0);
+    p = placeClip(p, v, p.tracks[0]!.id);
+    const tr = v.transform;
+    p = setCropAt(p, v.id, 0, tr, { l: 0, t: 0, r: 0, b: 0 }, true);
+    p = setCropAt(p, v.id, 4, { ...tr, width: tr.width * 0.5 }, { l: 0.5, t: 0, r: 0, b: 0 }, true);
+    const c = p.clips.find((x) => x.id === v.id)!;
+    expect(c.type === 'video' && c.keyframes.map((k) => [k.t, k.crop?.l])).toEqual([[0, 0], [4, 0.5]]);
+    expect(effectiveCrop(c as VisualClip, 4)!.l).toBeCloseTo(0.5);
+    const mid = effectiveCrop(c as VisualClip, 2)!.l;
+    expect(mid).toBeGreaterThan(0.05);
+    expect(mid).toBeLessThan(0.45);
+    // mover em outro instante mantém o corte daquele instante no nó novo
+    p = setTransformAt(p, v.id, 6, { ...tr, x: 100 }, true);
+    const c2 = p.clips.find((x) => x.id === v.id)!;
+    expect(c2.type === 'video' && c2.keyframes.find((k) => k.t === 6)?.crop?.l).toBeCloseTo(0.5);
   });
 
   it('moldura é item normal: entra na agulha, pode haver várias e enquadra o vídeo do trecho', () => {

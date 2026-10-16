@@ -8,8 +8,7 @@ import type { MediaAsset } from '../../core/model';
 import { uid } from '../../core/id';
 import type { MediaService } from '../types';
 import { idbAll, idbDelete, idbGet, idbPut } from './idb';
-import horizontalUrl from '../../assets/pn-logo-horizontal.png';
-import normalUrl from '../../assets/pn-logo-normal.png';
+import { BUNDLED_BASIC, BUNDLED_LOGOS } from '../bundledBrand';
 
 type StoredMeta = Omit<MediaAsset, 'url' | 'thumbs' | 'waveform'> & {
   thumbs: Omit<NonNullable<MediaAsset['thumbs']>, 'url'> | null;
@@ -151,22 +150,7 @@ async function process(meta: StoredMeta, file: Blob) {
 }
 
 /** Logos oficiais já embutidas no app + imagens de marca enviadas pelo usuário. */
-const BUNDLED_BRAND: MediaAsset[] = [
-  { id: 'brand:logo-horizontal', name: 'Logo horizontal', url: horizontalUrl, width: 1572, height: 516 },
-  { id: 'brand:logo-normal', name: 'Logo normal', url: normalUrl, width: 1214, height: 1058 },
-].map((b) => ({
-  ...b,
-  kind: 'image' as const,
-  brand: true,
-  duration: 0,
-  fps: 0,
-  hasAudio: false,
-  status: 'ready' as const,
-  thumbs: null,
-  waveform: null,
-  size: 0,
-  createdAt: '2026-01-01T00:00:00.000Z',
-}));
+const BUNDLED_BRAND: MediaAsset[] = [...BUNDLED_BASIC, ...BUNDLED_LOGOS];
 
 async function ingest(file: File, onProgress: ((f: number) => void) | undefined, brand: boolean): Promise<MediaAsset> {
   const id = uid();

@@ -19,7 +19,7 @@ import {
   trimStart,
 } from '../../core/timeline';
 import { getPreset } from '../../core/presets';
-import { getEditor, useEditor } from '../../state/store';
+import { getEditor, setAutoKey, useEditor } from '../../state/store';
 import { createAudioClip, createImageClip, createVideoClip } from '../../core/factory';
 import { deleteSelection, detachAudio, duplicateSelection, seek, splitAtPlayhead, recentlyAdded } from '../commands';
 import { formatTime } from '../Transport';
@@ -75,6 +75,7 @@ export function Timeline() {
   const zoom = useEditor((s) => s.zoom);
   const selection = useEditor((s) => s.selection);
   const snapping = useEditor((s) => s.snapping);
+  const autoKey = useEditor((s) => s.autoKey);
   const media = useEditor((s) => s.media);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ left: 0, width: 800 });
@@ -430,6 +431,15 @@ export function Timeline() {
         <button className="icon-btn" disabled={!selVideo} onClick={detachAudio} title="Separar áudio do vídeo" aria-label="Separar áudio">
           <IconDetach />
         </button>
+        <button
+          className={`btn sm pancrop-btn ${autoKey ? 'on' : ''}`}
+          onClick={() => setAutoKey(!autoKey)}
+          title="Event Pan/Crop (como no Vegas): ligado, mexer/cortar o item grava um nó ◆ na agulha e ele se move entre os nós"
+          aria-pressed={autoKey}
+          data-testid="tl-pancrop"
+        >
+          ◆ Pan/Crop
+        </button>
         <span className="tl-sep" />
         <button
           className={`icon-btn ${snapping ? 'on' : ''}`}
@@ -689,6 +699,8 @@ const ClipView = memo(function ClipView({
     clip.type === 'text' ? `${getPreset(clip.preset).name} · ${clip.fields.title.replace(/\*/g, '')}` : clip.name || TYPE_LABEL[clip.type];
   const speed = (clip.type === 'video' || clip.type === 'audio') && clip.speed !== 1 ? `${clip.speed}×` : null;
   const muted = (clip.type === 'video' || clip.type === 'audio') && clip.muted;
+  // nó no início/fim fica para dentro do clipe (senão some sob as alças de esticar)
+  const kfX = (t: number) => Math.min(Math.max(t * zoom, 8), Math.max(8, w - 8));
 
   return (
     <div
@@ -707,12 +719,18 @@ const ClipView = memo(function ClipView({
         {speed && <span className="clip-badge">{speed}</span>}
         <span className="clip-name">{label}</span>
       </div>
+      {clip.type !== 'audio' && clip.keyframes.length > 1 && (
+        <span
+          className="kf-line"
+          style={{ left: kfX(clip.keyframes[0]!.t), width: kfX(clip.keyframes[clip.keyframes.length - 1]!.t) - kfX(clip.keyframes[0]!.t) }}
+        />
+      )}
       {clip.type !== 'audio' &&
         clip.keyframes.map((k, i) => (
           <span
             key={i}
             className="kf-dot"
-            style={{ left: k.t * zoom }}
+            style={{ left: kfX(k.t) }}
             title={`Nó em ${(clip.start + k.t).toFixed(2)} s — toque para ir até ele`}
             onPointerDown={(e) => {
               // tocar no nó leva a agulha até ele (sem arrastar o clipe)

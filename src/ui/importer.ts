@@ -89,7 +89,7 @@ export async function loadAllMedia() {
  * biblioteca de mídia; depois reaproveita o mesmo arquivo.
  */
 export async function ensureOutroAudio(): Promise<MediaAsset> {
-  const KEY = 'pn-outro-media-v2';
+  const KEY = 'pn-outro-media-v3';
   const s = getEditor();
   let cachedId: string | null = null;
   try {
@@ -101,7 +101,7 @@ export async function ensureOutroAudio(): Promise<MediaAsset> {
   if (cached && cached.status === 'ready') return cached;
   const { default: url } = await import('../assets/pn-encerramento.m4a');
   const blob = await (await fetch(url)).blob();
-  const file = new File([blob], 'encerramento-primeiras-noticias-v2.m4a', { type: 'audio/mp4' });
+  const file = new File([blob], 'encerramento-primeiras-noticias-v3.m4a', { type: 'audio/mp4' });
   const m = await mediaApi.upload(file);
   getEditor().upsertMedia(m);
   const ready = await waitReady(m.id);

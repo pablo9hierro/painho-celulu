@@ -11,7 +11,7 @@ import { FRAME_LOGO_DEFAULT, getFrame, type FrameLogoState } from '../../core/fr
 import { BRAND_SWATCHES, PN } from '../../core/brand';
 import { clearKeyframes, effectiveTransform, patchClip, setTransformAt, toggleKeyframeAt } from '../../core/edit';
 import { setSpeed, trimEnd } from '../../core/timeline';
-import { getEditor, useEditor } from '../../state/store';
+import { getEditor, setAutoKey, useEditor } from '../../state/store';
 import { detachAudio, fitSelection, removeImageBackground, resetClip } from '../commands';
 import { IconClose, IconKeyframe } from '../icons';
 
@@ -511,6 +511,24 @@ function ShapeSection({ clip }: { clip: ShapeClip }) {
   );
 }
 
+/** Event Pan/Crop (Vegas): liga a gravação automática de nós ao mexer no item. */
+function PanCropToggle({ count }: { count: number }) {
+  const autoKey = useEditor((s) => s.autoKey);
+  return (
+    <div className="pancrop-row">
+      <button className={`btn sm pancrop-btn ${autoKey ? 'on' : ''}`} onClick={() => setAutoKey(!autoKey)} aria-pressed={autoKey} data-testid="insp-pancrop">
+        ◆ Pan/Crop {autoKey ? 'ligado' : 'desligado'}
+      </button>
+      <p className="hint">
+        {autoKey
+          ? 'Ponha a agulha num ponto e mova, redimensione, gire ou corte o item: vira um nó ◆. Em outro ponto, ajuste de novo — o item se move entre os nós.'
+          : 'Ligue para animar o item como no Event Pan/Crop do Vegas.'}
+        {count > 0 ? ` · ${count} nó(s)` : ''}
+      </p>
+    </div>
+  );
+}
+
 function TransformSection({ clip, time }: { clip: VisualClip; time: number }) {
   const tr = effectiveTransform(clip, time);
   const local = time - clip.start;
@@ -539,7 +557,7 @@ function TransformSection({ clip, time }: { clip: VisualClip; time: number }) {
         </div>
       }
     >
-      {clip.keyframes.length > 0 && <p className="hint">{clip.keyframes.length} keyframe(s): mover o item grava a posição no instante da agulha.</p>}
+      <PanCropToggle count={clip.keyframes.length} />
       <div className="num-grid">
         <Num label="X" value={tr.x} onChange={set('x')} mergeKey="x" />
         <Num label="Y" value={tr.y} onChange={set('y')} mergeKey="y" />

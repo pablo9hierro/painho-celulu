@@ -14,6 +14,7 @@ import { BUILTIN, BUILTIN_URL, getFrameLogo, outroAuto, setFrameLogo, setOutroAu
 import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress } from '../importer';
 import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
+import { isBundledBrand, isSupersededBrand } from '../../platform/bundledBrand';
 
 /** arrastar para a timeline só com mouse; no toque, arrastar disparava inserção dupla */
 const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
@@ -152,7 +153,6 @@ function MediaPanel({ kinds }: { kinds: MediaAsset['kind'][] }) {
 }
 
 /** logos oficiais embutidas no app (não podem ser excluídas) */
-const isBundledBrand = (m: MediaAsset) => m.id === 'brand:logo-horizontal' || m.id === 'brand:logo-normal';
 
 /** Exclui uma imagem enviada na Marca (some também das logos da moldura/encerramento). */
 async function removeBrandAsset(m: MediaAsset): Promise<boolean> {
@@ -180,7 +180,7 @@ async function removeBrandAsset(m: MediaAsset): Promise<boolean> {
 function BrandPanel() {
   const all = useEditor((s) => s.media);
   const input = useRef<HTMLInputElement>(null);
-  const list = Object.values(all).filter((m) => m.brand);
+  const list = Object.values(all).filter((m) => m.brand && !isSupersededBrand(m));
   return (
     <>
       <p className="hint">
@@ -496,7 +496,7 @@ function OutroSettings() {
 
 function FrameLogos({ rows = FRAME_ROWS, title = 'Logos da moldura', testId = 'frame-logos' }: { rows?: { kind: FrameLogoKind; label: string }[]; title?: string; testId?: string }) {
   const all = useEditor((s) => s.media);
-  const brand = Object.values(all).filter((m) => m.brand && m.kind === 'image' && m.status === 'ready');
+  const brand = Object.values(all).filter((m) => m.brand && m.kind === 'image' && m.status === 'ready' && !isSupersededBrand(m));
   const [sel, setSel] = useState<Record<FrameLogoKind, string>>(() => ({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round'), outro: getFrameLogo('outro') }));
   const input = useRef<HTMLInputElement>(null);
   const choose = (kind: FrameLogoKind, id: string) => {

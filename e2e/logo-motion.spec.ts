@@ -85,8 +85,9 @@ test('Movimento (Pan/Crop do Vegas): mexer o item em pontos da agulha cria nós 
   await page.getByTestId('rail-text').click();
   await page.getByTestId('preset-pn-faixa').click();
   await page.getByTestId('rail-text').click();
-  await page.getByTestId('autokey').click();
-  await expect(page.getByTestId('autokey')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('tl-pancrop').click(); // botão Pan/Crop da timeline
+  await expect(page.getByTestId('tl-pancrop')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('pancrop-badge')).toBeVisible();
 
   const text = page.getByTestId('clip-text');
   const id = (await state(page)).clips.find((c) => c.type === 'text')!.id;
@@ -113,6 +114,7 @@ test('Movimento (Pan/Crop do Vegas): mexer o item em pontos da agulha cria nós 
   c = (await state(page)).clips.find((x) => x.id === id)!;
   expect(c.keyframes!.length).toBe(3);
   await expect(text.getByTestId('kf-dot')).toHaveCount(3);
+  await expect(text.locator('.kf-line')).toHaveCount(1);
   // tocar no nó leva a agulha até ele
   await text.getByTestId('kf-dot').nth(2).click(); // nó em 2 s (a agulha está no de 1 s)
   const t = await page.evaluate(() => (window as unknown as { __editor: { getState(): { time: number } } }).__editor.getState().time);

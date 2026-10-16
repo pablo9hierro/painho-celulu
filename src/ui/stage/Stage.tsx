@@ -24,7 +24,7 @@ import {
   type Guide,
   type Handle,
 } from '../../core/geometry';
-import { effectiveTransform, patchClip, setTransformAt } from '../../core/edit';
+import { effectiveCrop, effectiveTransform, patchClip, setCropAt, setTransformAt } from '../../core/edit';
 import { renderFrame } from '../../render/renderer';
 import { preview } from '../../engine/preview';
 import { getEditor, useEditor } from '../../state/store';
@@ -172,6 +172,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
   const scene = evaluateScene(project, time);
   const items = scene.filter((it) => !lockedTracks.has(it.clip.trackId) && it.clip.type !== 'frame');
   const frameLogoId = useEditor((s) => s.frameLogoId);
+  const autoKey = useEditor((s) => s.autoKey);
 
   /** logo do cabeçalho da moldura sob o ponto (clicável no preview, sem item na timeline) */
   const frameLogoAt = (pt: { x: number; y: number }) => {
@@ -359,7 +360,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       // deslocamento do ponteiro no eixo local do item
       const d = rotate(pt.x - g.start.x, pt.y - g.start.y, -g.base.rotation);
       const r = dragCrop(g.base, g.crop, g.edge, g.edge === 'l' || g.edge === 'r' ? d.x : d.y);
-      s.updateGesture((base) => patchClip(setTransformAt(base, g.id, s.time, r.transform, s.autoKey), g.id, { crop: r.crop } as Partial<VisualClip>));
+      s.updateGesture((base) => setCropAt(base, g.id, s.time, r.transform, r.crop, s.autoKey));
     }
   };
 
@@ -402,7 +403,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
     s.beginGesture();
     const base = effectiveTransform(clip, s.time);
     if (handle === 'l' || handle === 't' || handle === 'r' || handle === 'b') {
-      const crop = (clip.type === 'video' || clip.type === 'image') && clip.crop ? clip.crop : NO_CROP;
+      const crop = clip.type === 'video' || clip.type === 'image' ? (effectiveCrop(clip, s.time) ?? NO_CROP) : NO_CROP;
       gesture.current = { kind: 'crop', id, edge: handle, start: pt, base, crop };
       return;
     }
@@ -451,6 +452,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       data-testid="stage-overlay"
     >
       {safeZones && <SafeZones project={project} scale={scale} />}
+      {autoKey && <div className="pancrop-badge" data-testid="pancrop-badge">◆ PAN/CROP · mova a agulha e ajuste o item</div>}
       {selectedItems.map((it) => (
         <Gizmo
           key={it.clip.id}
@@ -458,7 +460,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
           scale={scale}
           type={it.clip.type}
           primary={selectedItems.length === 1}
-          crop={cropId === it.clip.id && (it.clip.type === 'video' || it.clip.type === 'image') ? (it.clip.crop ?? NO_CROP) : null}
+          crop={cropId === it.clip.id && (it.clip.type === 'video' || it.clip.type === 'image') ? (effectiveCrop(it.clip, time) ?? NO_CROP) : null}
           onHandle={(e, h) => startHandle(e, it.clip.id, h)}
         />
       ))}

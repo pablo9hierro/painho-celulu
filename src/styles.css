@@ -2082,3 +2082,41 @@ input[type='range'] {
 .autokey-btn.on {
   color: #ffd23f;
 }
+
+/* ---------- Event Pan/Crop ---------- */
+.pancrop-btn {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pancrop-btn.on {
+  background: #ffd23f;
+  border-color: #ffd23f;
+  color: #1a1400;
+}
+.pancrop-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.pancrop-badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 210, 63, 0.92);
+  color: #1a1400;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+  z-index: 5;
+  max-width: calc(100% - 16px);
+}
+.kf-line {
+  position: absolute;
+  bottom: 8px;
+  height: 2px;
+  background: rgba(255, 210, 63, 0.75);
+  pointer-events: none;
+}
