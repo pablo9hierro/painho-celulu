@@ -10,6 +10,7 @@ import { Timeline } from './timeline/Timeline';
 import { Inspector } from './inspector/Inspector';
 import { SidePanel } from './panels/SidePanel';
 import { ExportDialog } from './ExportDialog';
+import { PostDialog } from './PostDialog';
 import { Transport } from './Transport';
 import {
   copySelection,
@@ -26,7 +27,9 @@ import {
 import { importFiles, loadAllMedia } from './importer';
 import { useBackHandler } from '../platform/backButton';
 import { applyFrameLogos } from './frameLogos';
+import { clearBackup, readBackup, writeBackup } from './projectBackup';
 import {
+  IconNews,
   IconAudio,
   IconBack,
   IconBlur,
@@ -60,6 +63,7 @@ export function Editor({ projectId }: { projectId: string }) {
   const selectionCount = useEditor((s) => s.selection.length);
   const [error, setError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [post, setPost] = useState<{ videoFile?: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const saveTimer = useRef<number | null>(null);
@@ -109,7 +113,10 @@ export function Editor({ projectId }: { projectId: string }) {
     Promise.all([projects.get(projectId), loadAllMedia(), ensureFonts()])
       .then(([p]) => {
         if (!alive) return;
-        getEditor().load(p);
+        // havia uma cópia de segurança (app fechado antes de terminar de salvar): usa ela
+        const backup = readBackup(p.id);
+        getEditor().load(backup ?? p);
+        if (backup) getEditor().set('saveState', 'dirty');
         // logos padrão das molduras escolhidas pelo usuário
         applyFrameLogos(getEditor().media);
       })
@@ -122,6 +129,15 @@ export function Editor({ projectId }: { projectId: string }) {
 
   // mídia → motor do preview
   useEffect(() => useEditor.subscribe((s) => preview.setMedia(s.media)), []);
+  // a lista de logos pode chegar depois do projeto: reaplica as escolhidas
+  // (moldura e encerramento) sempre que a mídia muda
+  useEffect(
+    () =>
+      useEditor.subscribe((s, prev) => {
+        if (s.media !== prev.media) applyFrameLogos(s.media);
+      }),
+    [],
+  );
   useEffect(() => preview.setMedia(getEditor().media), []);
 
   // sincronização do preview com tempo/projeto
@@ -137,30 +153,54 @@ export function Editor({ projectId }: { projectId: string }) {
   );
 
   // salvamento automático (não salva no meio de um gesto)
-  useEffect(
-    () =>
-      useEditor.subscribe((s) => {
-        if (s.saveState !== 'dirty' || s.gestureBase || !s.project) return;
-        if (saveTimer.current) window.clearTimeout(saveTimer.current);
-        saveTimer.current = window.setTimeout(() => {
-          const cur = getEditor();
-          if (!cur.project || cur.gestureBase) return;
-          const snapshot = cur.project;
-          cur.set('saveState', 'saving');
-          projects
-            .save(snapshot, captureThumb())
-            .then(() => {
-              if (getEditor().project === snapshot) getEditor().set('saveState', 'saved');
-              else getEditor().set('saveState', 'dirty');
-            })
-            .catch((e: Error) => {
-              getEditor().set('saveState', 'error');
-              getEditor().set('saveError', e.message);
-            });
-        }, 700);
-      }),
-    [],
-  );
+  useEffect(() => {
+    const save = () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      const cur = getEditor();
+      if (!cur.project || (cur.saveState !== 'dirty' && cur.saveState !== 'error')) return;
+      const snapshot = cur.project;
+      cur.set('saveState', 'saving');
+      projects
+        .save(snapshot, captureThumb())
+        .then(() => {
+          if (getEditor().project === snapshot) {
+            getEditor().set('saveState', 'saved');
+            clearBackup(snapshot.id);
+          } else getEditor().set('saveState', 'dirty');
+        })
+        .catch((e: Error) => {
+          getEditor().set('saveState', 'error');
+          getEditor().set('saveError', e.message);
+          // tenta de novo sozinho (ex.: servidor reiniciando, armazenamento ocupado)
+          saveTimer.current = window.setTimeout(save, 3000);
+        });
+    };
+    const unsub = useEditor.subscribe((s) => {
+      if (s.saveState !== 'dirty' || s.gestureBase || !s.project) return;
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(save, 700);
+    });
+    // app indo para segundo plano / fechando: salva NA HORA (no celular o
+    // aplicativo pode ser encerrado antes do tempo do salvamento automático)
+    const now = () => {
+      const s = getEditor();
+      if (!s.project || s.saveState === 'saved') return;
+      // cópia instantânea primeiro (o salvamento normal pode ser cortado ao fechar)
+      writeBackup(s.gestureBase ?? s.project);
+      if (!s.gestureBase && (s.saveState === 'dirty' || s.saveState === 'error')) save();
+    };
+    const onVis = () => document.visibilityState === 'hidden' && now();
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', now);
+    return () => {
+      unsub();
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', now);
+      // saindo do editor (voltar para a lista): não perde a última alteração
+      now();
+    };
+  }, []);
 
   // aviso ao fechar com alterações pendentes
   useEffect(() => {
@@ -289,6 +329,9 @@ export function Editor({ projectId }: { projectId: string }) {
         <button className="icon-btn" disabled={!canRedo} onClick={() => getEditor().redo()} title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer">
           <IconRedo />
         </button>
+        <button className="btn" onClick={() => setPost({})} data-testid="open-post" aria-label="Matéria" data-tip="Buscar a notícia e escrever a matéria do Instagram">
+          <IconNews /> <span className="hide-sm">Matéria</span>
+        </button>
         <button className="btn primary" onClick={() => setExportOpen(true)} data-testid="open-export" data-tip="Exportar o vídeo final em MP4 para o aparelho">
           <IconExport /> <span className="hide-sm">Exportar</span>
         </button>
@@ -319,7 +362,16 @@ export function Editor({ projectId }: { projectId: string }) {
       </section>
 
       {dragOver && <div className="drop-overlay">Solte para importar e adicionar à timeline</div>}
-      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+      {exportOpen && (
+        <ExportDialog
+          onClose={() => setExportOpen(false)}
+          onPost={(videoFile) => {
+            setExportOpen(false);
+            setPost({ videoFile });
+          }}
+        />
+      )}
+      {post && <PostDialog videoFile={post.videoFile} onClose={() => setPost(null)} />}
     </div>
   );
 }

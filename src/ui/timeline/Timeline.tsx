@@ -694,6 +694,7 @@ const ClipView = memo(function ClipView({
   selected: boolean;
   asset?: MediaAsset;
 }) {
+  const kfSel = useEditor((s) => s.kfSel);
   const w = Math.max(2, clip.duration * zoom);
   const label =
     clip.type === 'text' ? `${getPreset(clip.preset).name} · ${clip.fields.title.replace(/\*/g, '')}` : clip.name || TYPE_LABEL[clip.type];
@@ -729,14 +730,17 @@ const ClipView = memo(function ClipView({
         clip.keyframes.map((k, i) => (
           <span
             key={i}
-            className="kf-dot"
+            className={`kf-dot ${kfSel && kfSel.clipId === clip.id && Math.abs(kfSel.t - k.t) < 1 / 60 ? 'on' : ''}`}
             style={{ left: kfX(k.t) }}
             title={`Nó em ${(clip.start + k.t).toFixed(2)} s — toque para ir até ele`}
             onPointerDown={(e) => {
               // tocar no nó leva a agulha até ele (sem arrastar o clipe)
               e.stopPropagation();
-              getEditor().select([clip.id]);
+              const ed = getEditor();
+              ed.select([clip.id]);
               seek(clip.start + k.t);
+              // nó selecionado: o que for ajustado agora edita este nó; lixeira apaga só ele
+              ed.set('kfSel', { clipId: clip.id, t: k.t });
             }}
             data-testid="kf-dot"
           />

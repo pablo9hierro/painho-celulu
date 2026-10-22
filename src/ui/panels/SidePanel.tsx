@@ -5,11 +5,12 @@ import { FRAMES, insertFrame, frameWindow, getFrame } from '../../core/frames';
 import { createTextClip, createProject } from '../../core/factory';
 import { drawHeadline } from '../../render/headlines';
 import { ensureFonts } from '../../render/fonts';
-import { ensureBrandAssets } from '../../render/brandAssets';
+import { ensureBrandAssets, onBrandLoaded } from '../../render/brandAssets';
+import { onStampChange } from '../../render/stampSettings';
 import { renderFrame } from '../../render/renderer';
 import { IS_LOCAL, media as mediaApi } from '../../platform/api';
 import { getEditor, useEditor, type Panel } from '../../state/store';
-import { addMedia, addOutro, addText, applyFrameCmd } from '../commands';
+import { addBwFilter, addMedia, addOutro, addText, applyFrameCmd } from '../commands';
 import { BUILTIN, BUILTIN_URL, getFrameLogo, outroAuto, setFrameLogo, setOutroAuto, type FrameLogoKind } from '../frameLogos';
 import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress } from '../importer';
 import { formatTime } from '../Transport';
@@ -290,11 +291,21 @@ function TextPanel() {
         <h4>Encerramento</h4>
         <OutroSettings />
       </section>
+      <section className="preset-section">
+        <h4>Filtros</h4>
+        <button className="template-card filter-card" onClick={addBwFilter} data-testid="add-bw">
+          <span className="filter-swatch" aria-hidden />
+          <span>
+            <strong>Preto e branco</strong>
+            <span className="muted small">Deixa o vídeo em preto e branco a partir da agulha. Manchetes, logos e molduras continuam coloridas. Estique na timeline para cobrir o trecho.</span>
+          </span>
+        </button>
+      </section>
       {CATS.map((cat) => (
         <section key={cat.id} className="preset-section">
           <h4>{cat.label}</h4>
           <div className="preset-grid">
-            {HEADLINE_PRESETS.filter((p) => p.category === cat.id).map((p) => (
+            {HEADLINE_PRESETS.filter((p) => p.category === cat.id && !p.hidden).map((p) => (
               <button key={p.id} className="preset-card" onClick={() => addText(p.id)} title={p.description} data-testid={`preset-${p.id}`}>
                 <PresetThumb presetId={p.id} />
                 <span>{p.name}</span>
@@ -310,6 +321,16 @@ function TextPanel() {
 /** Miniatura viva do preset, desenhada pelo mesmo código do vídeo final. */
 function PresetThumb({ presetId }: { presetId: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // logo trocada ou carimbo ajustado: redesenha na hora
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const a = onBrandLoaded(() => setTick((n) => n + 1));
+    const b = onStampChange(() => setTick((n) => n + 1));
+    return () => {
+      a();
+      b();
+    };
+  }, []);
   useEffect(() => {
     let alive = true;
     void Promise.all([ensureFonts(), ensureBrandAssets()]).then(() => {
@@ -333,12 +354,13 @@ function PresetThumb({ presetId }: { presetId: string }) {
       const s = Math.min((W * 0.92) / tw, (H * 0.8) / th) * dpr;
       ctx.translate((c.width - tw * s) / 2, (c.height - th * s) / 2);
       ctx.scale(s, s);
-      drawHeadline(ctx, clip, { w: tw, h: th, p: 1, t: 1.2 });
+      // encerramento: instante em que a logo e o @perfil já estão parados
+      drawHeadline(ctx, clip, { w: tw, h: th, p: 1, t: presetId === 'pn-encerramento' ? 2.8 : presetId === 'pn-edicao' ? 5 : 1.2 });
     });
     return () => {
       alive = false;
     };
-  }, [presetId]);
+  }, [presetId, tick]);
   return <canvas ref={ref} className="preset-thumb" />;
 }
 
@@ -497,7 +519,9 @@ function OutroSettings() {
 function FrameLogos({ rows = FRAME_ROWS, title = 'Logos da moldura', testId = 'frame-logos' }: { rows?: { kind: FrameLogoKind; label: string }[]; title?: string; testId?: string }) {
   const all = useEditor((s) => s.media);
   const brand = Object.values(all).filter((m) => m.brand && m.kind === 'image' && m.status === 'ready' && !isSupersededBrand(m));
-  const [sel, setSel] = useState<Record<FrameLogoKind, string>>(() => ({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round'), outro: getFrameLogo('outro') }));
+  const [rawSel, setSel] = useState<Record<FrameLogoKind, string>>(() => ({ horizontal: getFrameLogo('horizontal'), round: getFrameLogo('round'), outro: getFrameLogo('outro') }));
+  const exists = (id: string) => id === BUILTIN || brand.some((b) => b.id === id);
+  const sel = { horizontal: exists(rawSel.horizontal) ? rawSel.horizontal : BUILTIN, round: exists(rawSel.round) ? rawSel.round : BUILTIN, outro: exists(rawSel.outro) ? rawSel.outro : BUILTIN };
   const input = useRef<HTMLInputElement>(null);
   const choose = (kind: FrameLogoKind, id: string) => {
     setFrameLogo(kind, id, getEditor().media);

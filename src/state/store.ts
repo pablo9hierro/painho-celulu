@@ -30,6 +30,8 @@ interface EditorState {
   cropId: string | null;
   /** moldura cuja logo do cabeçalho está selecionada no preview */
   frameLogoId: string | null;
+  /** nó do Pan/Crop selecionado (clipe + instante local do nó) */
+  kfSel: { clipId: string; t: number } | null;
   /** modo "Movimento" (Pan/Crop do Vegas): mexer no item grava keyframe na agulha */
   autoKey: boolean;
   tool: Tool;
@@ -94,6 +96,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   previewFull: false,
   cropId: null,
   frameLogoId: null,
+  kfSel: null,
   autoKey: loadAutoKey(),
   tool: 'select',
   panel: 'media',
@@ -119,7 +122,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
   select: (ids, additive) =>
     set((s) => {
-      if (!additive) return { selection: ids, frameLogoId: null };
+      if (!additive) return { selection: ids, frameLogoId: null, kfSel: null };
       const next = new Set(s.selection);
       for (const id of ids) {
         if (next.has(id)) next.delete(id);
@@ -128,9 +131,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       return { selection: [...next] };
     }),
   setTime: (t) => {
-    const p = get().project;
+    const s = get();
+    const p = s.project;
     const max = p ? Math.max(projectDuration(p), 0) : 0;
-    set({ time: Math.max(0, Math.min(t, max)) });
+    const time = Math.max(0, Math.min(t, max));
+    // saiu do instante do nó selecionado: solta a seleção do nó
+    let kfSel = s.kfSel;
+    if (kfSel) {
+      const c = p?.clips.find((x) => x.id === kfSel!.clipId);
+      if (!c || Math.abs(c.start + kfSel.t - time) > 1 / 60) kfSel = null;
+    }
+    set({ time, kfSel });
   },
   setPlaying: (v) => set({ playing: v }),
   setZoom: (z) => set({ zoom: Math.max(4, Math.min(600, z)) }),

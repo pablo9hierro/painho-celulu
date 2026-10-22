@@ -11,6 +11,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: true,
+    // pastas com vídeos grandes (testes, mídia do usuário, exportações): não vigiar
+    watch: { ignored: ['**/e2e/**', '**/test-results/**', '**/data/**', '**/brand/**', '**/android/**', '**/dist/**'] },
     proxy: {
       '/api': { target: `http://127.0.0.1:${API_PORT}`, changeOrigin: false },
     },

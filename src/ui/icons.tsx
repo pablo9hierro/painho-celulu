@@ -52,3 +52,8 @@ export const IconUpload = (p: I) => <P {...p} d={['M10 13V4', 'M6.5 7.5L10 4l3.5
 export const IconDetach = (p: I) => <P {...p} d={['M3 6h14', 'M3 14h14', 'M10 8v4']} />;
 export const IconLayers = (p: I) => <P {...p} d={['M10 3l7 4-7 4-7-4z', 'M3 11l7 4 7-4']} />;
 export const IconSettings = (p: I) => <P {...p} d={['M4 6h7', 'M15 6h1', 'M4 14h1', 'M9 14h7', 'M13 4v4', 'M7 12v4']} />;
+export const IconNews = (p: I) => <P {...p} d={['M4 4.5h10v11H5.5A1.5 1.5 0 014 14z', 'M14 7.5h2v6.5a1.5 1.5 0 01-1.5 1.5', 'M6.5 7.5h5', 'M6.5 10h5', 'M6.5 12.5h3']} />;
+export const IconTrend = (p: I) => <P {...p} d={['M3 14.5l4.5-4.5 3 3L17 6.5', 'M12.5 6.5H17V11']} />;
+export const IconClip = (p: I) => <P {...p} d={['M12.5 6.5l-5 5a1.8 1.8 0 002.5 2.5l5.5-5.5a3.2 3.2 0 00-4.5-4.5L5.5 9.5a4.6 4.6 0 006.5 6.5l4.5-4.5']} />;
+export const IconSend = (p: I) => <P {...p} d={['M3 10l14-6-5 14-2.5-5.5z', 'M9.5 12.5L17 4']} />;
+export const IconDownload = (p: I) => <P {...p} d={['M10 3.5v9', 'M6.2 9l3.8 3.8L13.8 9', 'M4 15.5h12']} />;

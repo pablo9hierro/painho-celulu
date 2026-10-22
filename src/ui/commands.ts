@@ -14,11 +14,11 @@ import {
   NEUTRAL_ADJUST,
 } from '../core/factory';
 import { uid } from '../core/id';
-import { clipEnd, deleteClips, duplicateClip, findClip, placeClip, projectDuration, splitClip } from '../core/timeline';
+import { clipEnd, deleteClips, duplicateClip, findClip, newTrack, placeClip, projectDuration, splitClip } from '../core/timeline';
 import { coverWindow, FRAME_LOGO_DEFAULT, fitVideosToFrame, frameAt, getFrame, insertFrame } from '../core/frames';
 import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
-import { effectiveTransform, patchClip } from '../core/edit';
+import { effectiveTransform, patchClip, updateClip } from '../core/edit';
 import { ensureOutroAudio, waitReady } from './importer';
 import { cutoutImage } from '../platform/imagePrep';
 import { media as mediaApi } from '../platform/api';
@@ -208,9 +208,34 @@ export function splitAtPlayhead() {
   if (newIds.length) s.select(newIds);
 }
 
+/** Remove o nó do Pan/Crop selecionado (o item continua, na posição daquele instante). */
+export function deleteKeyframe(clipId: string, t: number) {
+  const s = st();
+  s.apply((p) =>
+    updateClip(p, clipId, (c) => {
+      if (!isVisual(c)) return c;
+      const rest = c.keyframes.filter((k) => Math.abs(k.t - t) > 1 / 60);
+      if (rest.length === c.keyframes.length) return c;
+      if (rest.length === 0) {
+        // último nó: o item fica parado como estava nesse nó
+        const k = c.keyframes[0]!;
+        const tr = { x: k.x, y: k.y, width: k.width, height: k.height, rotation: k.rotation, opacity: k.opacity };
+        return { ...c, transform: tr, keyframes: [], ...((c.type === 'video' || c.type === 'image') && k.crop ? { crop: k.crop } : {}) } as Clip;
+      }
+      return { ...c, keyframes: rest } as Clip;
+    }),
+  );
+  s.set('kfSel', null);
+}
+
 export function deleteSelection(ripple = false) {
   const s = st();
   if (!s.project || !s.selection.length) return;
+  // nó do Pan/Crop selecionado: apaga só o nó
+  if (s.kfSel && s.selection.includes(s.kfSel.clipId)) {
+    deleteKeyframe(s.kfSel.clipId, s.kfSel.t);
+    return;
+  }
   // logo da moldura selecionada no preview: tira só a logo, a moldura fica
   if (s.frameLogoId && s.selection.length === 1 && s.selection[0] === s.frameLogoId) {
     const id = s.frameLogoId;
@@ -412,6 +437,34 @@ export async function removeImageBackground(clipId: string) {
   } catch (e) {
     st().notify(`Não foi possível remover o fundo: ${(e as Error).message}`, 'error');
   }
+}
+
+/**
+ * Filtro preto e branco: camada de ajuste no quadro inteiro, na agulha, numa
+ * trilha logo acima do vídeo principal (abaixo de molduras e manchetes, que
+ * continuam coloridas). Estique na timeline para cobrir o trecho desejado.
+ */
+export function addBwFilter() {
+  const s = st();
+  if (!s.project) return;
+  const p0 = s.project;
+  const c = createBlurClip(p0, { x: p0.width / 2, y: p0.height / 2, width: p0.width, height: p0.height }, s.time);
+  c.mode = 'bw';
+  c.intensity = 100;
+  c.name = 'Filtro preto e branco';
+  s.apply((p) => {
+    let tracks = p.tracks;
+    const end = c.start + c.duration;
+    const free = (id: string) => !p.clips.some((x) => x.trackId === id && x.start < end - 1e-6 && x.start + x.duration > c.start + 1e-6);
+    let track = tracks.find((t) => t.kind === 'visual' && t.name.startsWith('Filtro') && free(t.id));
+    if (!track) {
+      track = newTrack('visual', 'Filtro');
+      const mainIdx = tracks.findIndex((t) => t.kind === 'visual');
+      tracks = [...tracks.slice(0, mainIdx + 1), track, ...tracks.slice(mainIdx + 1)];
+    }
+    return { ...p, tracks, clips: [...p.clips, { ...c, trackId: track.id }] };
+  });
+  s.select([c.id]);
 }
 
 const OUTRO_PRESET = 'pn-encerramento';

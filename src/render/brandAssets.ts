@@ -6,29 +6,38 @@ import horizontalUrl from '../assets/pn-logo-horizontal.png';
 import normalUrl from '../assets/pn-logo-normal.png';
 import watermarkUrl from '../assets/pn-logo-watermark.jpg';
 import symbolUrl from '../assets/pn-symbol-watermark.jpg';
-import roundUrl from '../assets/pn-logo-round.png';
+// redonda com borda fina (o halo grande da original foi cortado; a original continua em pn-logo-round.png)
+import roundUrl from '../assets/pn-logo-round-fina.png';
+import stampUrl from '../assets/logos/pn-3d-azul.webp';
 
 /**
  * `watermark` = logo horizontal sobre fundo preto; `symbol` = só o símbolo "pn"
  * sobre fundo preto (carimbo das manchetes, mesclagem "screen").
  */
-export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol' | 'round' | 'outro';
+export type BrandLogo = 'horizontal' | 'normal' | 'watermark' | 'symbol' | 'round' | 'outro' | 'stamp';
 /** Logos que o usuário pode trocar (molduras e encerramento). */
 export type CustomLogo = 'horizontal' | 'round' | 'outro';
 
-export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508, round: 1237 / 1000, outro: 1214 / 1058 };
+export const LOGO_RATIO: Record<BrandLogo, number> = { horizontal: 1572 / 516, normal: 1214 / 1058, watermark: 1564 / 508, symbol: 612 / 508, round: 1134 / 886, outro: 1214 / 1058, stamp: 1 };
 
-const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl, round: roundUrl, outro: normalUrl };
+const urls: Record<BrandLogo, string> = { horizontal: horizontalUrl, normal: normalUrl, watermark: watermarkUrl, symbol: symbolUrl, round: roundUrl, outro: normalUrl, stamp: stampUrl };
 const imgs: Partial<Record<BrandLogo, HTMLImageElement>> = {};
 const listeners = new Set<() => void>();
 let ready: Promise<void> | null = null;
+/** logo pedida por último para cada tipo trocável (escolha do usuário ou a embutida) */
+const wanted: Partial<Record<CustomLogo, string>> = {};
 
 function load(k: BrandLogo): Promise<void> {
   return new Promise((resolve) => {
     const img = new Image();
     img.decoding = 'async';
     img.onload = () => {
+      // a logo embutida chegou DEPOIS da escolhida pelo usuário: não sobrescreve
+      // (era o que fazia o encerramento/cabeçalho voltar para a padrão, e esticada)
+      const want = (wanted as Partial<Record<BrandLogo, string>>)[k];
+      if (want && want !== img.src) return resolve();
       imgs[k] = img;
+      if (img.naturalWidth && img.naturalHeight && k in wanted) LOGO_RATIO[k] = img.naturalWidth / img.naturalHeight;
       listeners.forEach((l) => l());
       resolve();
     };
@@ -38,7 +47,7 @@ function load(k: BrandLogo): Promise<void> {
 }
 
 export function ensureBrandAssets(): Promise<void> {
-  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol'), load('round'), load('outro')]).then(() => undefined);
+  if (!ready) ready = Promise.all([load('horizontal'), load('normal'), load('watermark'), load('symbol'), load('round'), load('outro'), load('stamp')]).then(() => undefined);
   return ready;
 }
 
@@ -57,11 +66,15 @@ export function brandVersion() {
 }
 export function setLogoOverride(kind: CustomLogo, url: string | null): Promise<void> {
   const src = url ?? urls[kind];
-  if (imgs[kind]?.src && new URL(src, location.href).href === imgs[kind]!.src) return Promise.resolve();
+  const abs = new URL(src, location.href).href;
+  wanted[kind] = abs;
+  if (imgs[kind]?.src === abs) return Promise.resolve();
   return new Promise((resolve) => {
     const img = new Image();
     img.decoding = 'async';
     img.onload = () => {
+      // uma escolha mais nova já foi pedida: ignora esta (carregou atrasada)
+      if (wanted[kind] !== abs) return resolve();
       imgs[kind] = img;
       if (img.naturalWidth && img.naturalHeight) LOGO_RATIO[kind] = img.naturalWidth / img.naturalHeight;
       version++;

@@ -10,8 +10,9 @@ import { clamp, ease, seg } from '../core/animation';
 import { FONTS, PN } from '../core/brand';
 import { getPreset } from '../core/presets';
 import { applyFont, drawLines, fitText, lineX, type FontSpec } from './text';
-import { brandImage, drawInstagramGlyph, drawLogo, LOGO_RATIO } from './brandAssets';
+import { brandImage, drawInstagramGlyph, LOGO_RATIO } from './brandAssets';
 import { incrust } from './incrust';
+import { edicao } from './edicao';
 
 type C = CanvasRenderingContext2D;
 
@@ -156,7 +157,8 @@ function faixa(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
 }
 
 function urgente(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
-  const s = c.style;
+  // cor da marca (azul-claro do brilho da logo) no lugar do amarelo antigo
+  const s = c.style.highlight.toUpperCase() === PN.yellow ? { ...c.style, highlight: PN.sky } : c.style;
   const fs = s.fontScale;
   const barW = Math.max(3, w * 0.008);
   const gap = w * 0.022;
@@ -610,13 +612,12 @@ function numero(ctx: C, c: TextClip, { w, h, p, t }: HeadlineArgs) {
 
 /** Selo oficial: logo + símbolo do Instagram + @primeirasnoticias_ (também usado pelas molduras). */
 export function drawHandle(ctx: C, w: number, h: number, align: 'left' | 'center' | 'right', f = 1) {
-  const lh = h * 0.86;
-  const lw = lh * LOGO_RATIO.horizontal; // proporção atual (a logo pode ser trocada)
   const gs = h * 0.56;
   applyFont(ctx, SANS_BOLD, h * 0.5);
   const tw = ctx.measureText(PN.handle).width;
   const pad = h * 0.3;
-  const total = pad + lw + pad * 1.2 + gs + h * 0.22 + tw + pad;
+  // só o símbolo do Instagram e o @perfil (sem a logo ao lado)
+  const total = pad + gs + h * 0.22 + tw + pad;
   const x0 = align === 'left' ? 0 : align === 'right' ? w - total : (w - total) / 2;
   ctx.save();
   ctx.globalAlpha *= f;
@@ -627,11 +628,7 @@ export function drawHandle(ctx: C, w: number, h: number, align: 'left' | 'center
   ctx.fillRect(x0, 0, total, h);
   ctx.fillStyle = PN.sky;
   ctx.fillRect(x0, h - Math.max(2, h * 0.06), total, Math.max(2, h * 0.06));
-  drawLogo(ctx, x0 + pad, (h - lh) / 2, lh);
-  let x = x0 + pad + lw + pad * 0.6;
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.fillRect(x, h * 0.22, Math.max(1.5, h * 0.03), h * 0.56);
-  x += pad * 0.6;
+  let x = x0 + pad;
   drawInstagramGlyph(ctx, x, (h - gs) / 2, gs);
   x += gs + h * 0.22;
   ctx.fillStyle = PN.white;
@@ -644,6 +641,51 @@ export function drawHandle(ctx: C, w: number, h: number, align: 'left' | 'center
 
 function perfil(ctx: C, c: TextClip, { w, h, p }: HeadlineArgs) {
   drawHandle(ctx, w, h, c.style.align, eo(seg(p, 0, 1)));
+}
+
+/** Só o @primeirasnoticias_ (marca d'água): branco com contorno fino, sem placa. */
+function marcaDagua(ctx: C, _c: TextClip, { w, h }: HeadlineArgs) {
+  applyFont(ctx, SANS_BOLD, h * 0.82);
+  const tw = ctx.measureText(PN.handle).width;
+  const size = h * 0.82 * Math.min(1, (w * 0.96) / Math.max(1, tw));
+  applyFont(ctx, SANS_BOLD, size);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1, size * 0.08);
+  ctx.strokeStyle = 'rgba(6,20,51,0.85)';
+  ctx.strokeText(PN.handle, w / 2, h * 0.54);
+  ctx.fillStyle = PN.white;
+  ctx.fillText(PN.handle, w / 2, h * 0.54);
+}
+
+/**
+ * Marca d'água central, simples: o símbolo da marca (anel + "pn") suave atrás
+ * e o @primeirasnoticias_ na frente, em branco limpo (só uma sombra leve, sem
+ * contorno grosso). A opacidade geral é a do item (ajustável no painel).
+ */
+function marcaCentro(ctx: C, c: TextClip, { w, h }: HeadlineArgs) {
+  const round = brandImage('round');
+  if (round) {
+    const lh = h * 0.92;
+    const lw = lh * LOGO_RATIO.round;
+    ctx.save();
+    ctx.globalAlpha *= 0.6;
+    ctx.drawImage(round, (w - lw) / 2, (h - lh) / 2, lw, lh);
+    ctx.restore();
+  }
+  const handle = c.fields.title.trim() || PN.handle;
+  applyFont(ctx, SANS_BOLD, h * 0.2);
+  const tw = ctx.measureText(handle).width;
+  const size = h * 0.2 * Math.min(1, (w * 0.92) / Math.max(1, tw));
+  applyFont(ctx, SANS_BOLD, size);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = size * 0.25;
+  ctx.fillStyle = PN.white;
+  ctx.fillText(handle, w / 2, h * 0.52);
+  noShadow(ctx);
 }
 
 function credito(ctx: C, c: TextClip, { w, h }: HeadlineArgs) {
@@ -841,6 +883,9 @@ function encerramento(ctx: C, c: TextClip, { w, h, t }: HeadlineArgs) {
 
 const DRAWERS: Record<string, (ctx: C, c: TextClip, a: HeadlineArgs) => void> = {
   'pn-encerramento': encerramento,
+  'pn-edicao': edicao,
+  'pn-marca-dagua': marcaDagua,
+  'pn-marca-centro': marcaCentro,
   'pn-faixa': faixa,
   'pn-urgente': urgente,
   'pn-tarja': tarja,

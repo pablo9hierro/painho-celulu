@@ -9,6 +9,7 @@ import { uid } from '../../core/id';
 import type { MediaService } from '../types';
 import { idbAll, idbDelete, idbGet, idbPut } from './idb';
 import { BUNDLED_BASIC, BUNDLED_LOGOS } from '../bundledBrand';
+import { audioPeaks, cachedIndex } from '../../engine/audioDecode';
 
 type StoredMeta = Omit<MediaAsset, 'url' | 'thumbs' | 'waveform'> & {
   thumbs: Omit<NonNullable<MediaAsset['thumbs']>, 'url'> | null;
@@ -107,6 +108,29 @@ async function makeWaveform(file: Blob): Promise<number[] | null> {
   }
 }
 
+/**
+ * Forma de onda sem carregar o arquivo inteiro: MP4/M4A pelo índice + leitura
+ * em partes; outros formatos só se o arquivo for pequeno. `hasTrack` diz se o
+ * arquivo tem trilha de áudio (quando dá para saber pelo índice).
+ */
+async function waveformOf(file: Blob): Promise<{ peaks: number[] | null; hasTrack?: boolean }> {
+  try {
+    const idx = await cachedIndex(file);
+    if (idx) {
+      if (!idx.audio) return { peaks: null, hasTrack: false };
+      const peaks = await audioPeaks(file, idx.audio).catch(() => null);
+      if (peaks) return { peaks, hasTrack: true };
+      return { peaks: file.size <= WAVE_WHOLE_LIMIT ? await makeWaveform(file) : null, hasTrack: true };
+    }
+  } catch {
+    /* segue para o caminho antigo */
+  }
+  return { peaks: file.size <= WAVE_WHOLE_LIMIT ? await makeWaveform(file) : null, hasTrack: file.size <= WAVE_WHOLE_LIMIT ? undefined : true };
+}
+
+/** acima disso não decodifica o arquivo inteiro de uma vez (o app fechava no celular) */
+const WAVE_WHOLE_LIMIT = 40 * 1024 * 1024;
+
 async function process(meta: StoredMeta, file: Blob) {
   const url = await blobUrl(meta.id);
   try {
@@ -127,8 +151,9 @@ async function process(meta: StoredMeta, file: Blob) {
         meta.height = el.videoHeight;
       }
       el.removeAttribute('src');
-      const peaks = await makeWaveform(file);
-      meta.hasAudio = !!peaks && peaks.some((p) => p > 2);
+      // forma de onda lida aos poucos (vídeos longos não estouram a memória)
+      const { peaks, hasTrack } = await waveformOf(file);
+      meta.hasAudio = hasTrack ?? (!!peaks && peaks.some((p) => p > 2));
       if (peaks) {
         await idbPut('derived', `${WAVE_PREFIX}${meta.id}`, { perSec: 50, peaks });
         meta.hasWaveform = true;

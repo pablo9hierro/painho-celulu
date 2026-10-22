@@ -21,7 +21,7 @@ async function reelWithVideo(page: Page) {
   await expect(page.getByTestId('clip-video')).toHaveCount(1);
 }
 
-test('logo da moldura: selecionar no preview, arrastar, opacidade e tirar (sem item novo na timeline)', async ({ page }) => {
+test('moldura sem logo no cabeçalho: nada para selecionar no topo e sem ajuste de logo', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await reelWithVideo(page);
@@ -29,54 +29,15 @@ test('logo da moldura: selecionar no preview, arrastar, opacidade e tirar (sem i
   await page.getByTestId('frame-topo').click();
   await page.getByTestId('rail-text').click(); // fecha o painel
   const before = (await state(page)).clips.length;
-
-  // toca na logo do cabeçalho (topo do quadro, no centro)
+  // tocar onde ficava a logo do cabeçalho não seleciona logo nenhuma
   const stage = (await page.getByTestId('stage-overlay').boundingBox())!;
-  const lx = stage.x + stage.width / 2;
-  const ly = stage.y + stage.height * 0.07;
-  await page.mouse.click(lx, ly);
-  await expect(page.getByTestId('frame-logo-gizmo')).toBeVisible();
-  let s = await state(page);
-  expect(s.frameLogoId).not.toBeNull();
-
-  // arrasta a logo
-  await page.mouse.move(lx, ly);
-  await page.mouse.down();
-  await page.mouse.move(lx + 40, ly + 30, { steps: 6 });
-  await page.mouse.up();
-  s = await state(page);
-  const frame = s.clips.find((c) => c.type === 'frame')!;
-  expect(frame.logo!.dx).toBeGreaterThan(20);
-  expect(frame.logo!.dy).toBeGreaterThan(10);
-  expect(s.clips.length).toBe(before); // nada novo na timeline
-
-  // opacidade nos Ajustes
-  await expect(page.getByTestId('frame-logo-controls')).toBeVisible();
-  const slider = page.getByTestId('frame-logo-controls').locator('input[type=range]');
-  await slider.fill('0.4');
-  s = await state(page);
-  expect(s.clips.find((c) => c.type === 'frame')!.logo!.opacity).toBeCloseTo(0.4, 1);
-  await page.screenshot({ path: 'test-results/logo-moldura-movida.png' });
-
-  // tirar com a lixeira: some só a logo, a moldura fica
-  await page.mouse.click(lx + 40, ly + 30);
-  await page.getByTestId('frame-logo-del').click();
-  s = await state(page);
-  const f2 = s.clips.find((c) => c.type === 'frame');
-  expect(f2).toBeTruthy();
-  expect(f2!.logo!.hidden).toBe(true);
+  await page.mouse.click(stage.x + stage.width / 2, stage.y + stage.height * 0.07);
   await expect(page.getByTestId('frame-logo-gizmo')).toHaveCount(0);
-
-  // a lixeira da timeline com a logo selecionada também só tira a logo
+  expect((await state(page)).frameLogoId).toBeNull();
+  // a moldura continua, sem o ajuste de logo
   await page.getByTestId('clip-frame').click();
-  await page.getByTestId('frame-logo-toggle').click(); // mostrar de novo
-  s = await state(page);
-  expect(s.clips.find((c) => c.type === 'frame')!.logo!.hidden).toBe(false);
-  await page.mouse.click(lx + 40, ly + 30);
-  await page.getByTestId('tl-delete').click();
-  s = await state(page);
-  expect(s.clips.filter((c) => c.type === 'frame')).toHaveLength(1);
-  expect(s.clips.find((c) => c.type === 'frame')!.logo!.hidden).toBe(true);
+  await expect(page.getByTestId('frame-logo-controls')).toHaveCount(0);
+  expect((await state(page)).clips.length).toBe(before);
   expect(errors).toEqual([]);
 });
 

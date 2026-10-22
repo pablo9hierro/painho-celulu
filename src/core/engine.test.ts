@@ -263,7 +263,9 @@ describe('cena e edição', () => {
     expect(createTextClip(p, 'pn-faixa', 55).duration).toBeCloseTo(5);
     const empty = createProject('e', 'reel');
     expect(createTextClip(empty, 'pn-faixa', 0).duration).toBe(15);
-    expect(createBlurClip(p, { x: 0, y: 0, width: 10, height: 10 }, 50).duration).toBeCloseTo(10);
+    // desfoque/filtro nascem com 5 s (bordas à vista para esticar/encolher), sem passar do fim
+    expect(createBlurClip(p, { x: 0, y: 0, width: 10, height: 10 }, 50).duration).toBeCloseTo(5);
+    expect(createBlurClip(p, { x: 0, y: 0, width: 10, height: 10 }, 57).duration).toBeCloseTo(3);
   });
 
   it('quadros de exportação', () => {

@@ -24,6 +24,12 @@ export interface HeadlinePreset {
   animOut: Animation;
   /** duração padrão em segundos; null = até o fim do vídeo */
   defaultDuration: number | null;
+  /** opacidade inicial (marca d'água semitransparente); padrão 1 */
+  opacity?: number;
+  /** ocupa o quadro inteiro (post animado) */
+  fullFrame?: boolean;
+  /** fora da lista (só continua valendo em projetos que já usam) */
+  hidden?: boolean;
 }
 
 const base: TextStyle = {
@@ -59,7 +65,7 @@ const RAW_PRESETS: HeadlinePreset[] = [
     id: 'pn-urgente',
     name: 'Urgente',
     category: 'manchete',
-    description: 'Selo amarelo, caixa azul e destaque em amarelo para trechos entre *asteriscos*.',
+    description: 'Selo azul-claro, caixa azul e destaque em azul-claro para trechos entre *asteriscos*.',
     size: { w: 0.88, h: 0.15 },
     pos: { x: 0.5, y: 0.62 },
     fields: {
@@ -68,7 +74,7 @@ const RAW_PRESETS: HeadlinePreset[] = [
       subtitle: '',
     },
     uses: ['kicker', 'title'],
-    style: { ...base, primary: PN.deep, align: 'left' },
+    style: { ...base, primary: PN.deep, highlight: PN.sky, align: 'left' },
     animIn: presetIn,
     animOut: presetOut,
     defaultDuration: null,
@@ -227,6 +233,50 @@ const RAW_PRESETS: HeadlinePreset[] = [
     animIn: { type: 'fade', duration: 0.4 },
     animOut: { type: 'fade', duration: 0.4 },
     defaultDuration: null,
+  },
+  {
+    id: 'pn-marca-dagua',
+    name: "Marca d'água @",
+    category: 'selo',
+    description: "Só o @primeirasnoticias_ em branco semitransparente, para ficar sobre o vídeo sem atrapalhar. Ajuste a opacidade aqui.",
+    size: { w: 0.62, h: 0.045 },
+    pos: { x: 0.5, y: 0.5 },
+    fields: { kicker: '', title: PN.handle, subtitle: '' },
+    uses: [],
+    style: { ...base, uppercase: false },
+    animIn: { type: 'none', duration: 0.4 },
+    animOut: { type: 'none', duration: 0.4 },
+    defaultDuration: null,
+    opacity: 0.35,
+  },
+  {
+    id: 'pn-marca-centro',
+    name: "Marca d'água central",
+    category: 'selo',
+    description: 'Símbolo da marca suave e o @primeirasnoticias_ no meio do vídeo: dá para ver o vídeo e a marca. Ajuste a opacidade aqui.',
+    size: { w: 0.6, h: 0.3 },
+    pos: { x: 0.5, y: 0.5 },
+    fields: { kicker: '', title: PN.handle, subtitle: '' },
+    uses: [],
+    style: { ...base, uppercase: true },
+    animIn: { type: 'none', duration: 0.4 },
+    animOut: { type: 'none', duration: 0.4 },
+    defaultDuration: null,
+    opacity: 0.3,
+  },
+  {
+    id: 'pn-edicao',
+    name: 'Edição (post em vídeo)',
+    category: 'manchete',
+    description: 'Placa do post em vídeo, abaixo da foto: abre do centro, logo impregnada andando atrás das letras, chapéu em aba azul, manchete palavra por palavra com UMA palavra-chave em destaque, linha fina e site. O fio do topo corre como barra de tempo.',
+    size: { w: 1, h: 0.3 },
+    pos: { x: 0.5, y: 0.775 },
+    fields: { kicker: 'Polícia', title: 'Mulher é detida ao tentar entrar com droga em *presídio* de João Pessoa', subtitle: 'Material estava escondido na roupa e foi achado na revista' },
+    uses: ['kicker', 'title', 'subtitle'],
+    style: { ...base, primary: PN.navy, accent: PN.sky, align: 'left', uppercase: false },
+    animIn: { type: 'preset', duration: 0.9 },
+    animOut: { type: 'preset', duration: 0.6 },
+    defaultDuration: 8,
   },
   {
     id: 'pn-encerramento',

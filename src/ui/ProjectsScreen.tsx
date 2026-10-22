@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FORMATS, type FormatId } from '../core/model';
 import { createProject } from '../core/factory';
 import { uid } from '../core/id';
 import { projects, type ProjectSummary } from '../platform/api';
 import { useEditor } from '../state/store';
-import { IconDots, IconPlus } from './icons';
+import { IconDots, IconDownload, IconMedia, IconNews, IconPlus, IconSend, IconTrend } from './icons';
+import { DownloadDialog } from './DownloadDialog';
+import { PostDialog } from './PostDialog';
+import { PostadorDialog } from './PostadorDialog';
+import { TrendsDialog } from './TrendsDialog';
 import { confirmDialog, promptDialog } from './dialogs';
 import { useBackHandler } from '../platform/backButton';
 
@@ -25,6 +29,11 @@ export function ProjectsScreen() {
   // botão voltar fecha o menu de opções aberto
   useBackHandler(menu !== null, () => setMenu(null));
   const notify = useEditor((s) => s.notify);
+  const [post, setPost] = useState<{ query?: string } | null>(null);
+  const [trends, setTrends] = useState(false);
+  const [dl, setDl] = useState(false);
+  const [postador, setPostador] = useState(false);
+  const newRef = useRef<HTMLElement>(null);
 
   const refresh = () =>
     projects
@@ -90,7 +99,47 @@ export function ProjectsScreen() {
         <span className="home-local">Local · seus arquivos não saem deste aparelho</span>
       </header>
 
-      <section className="home-new">
+      <section className="home-hub" aria-label="O que você quer fazer?">
+        <button className="hub-card" onClick={() => newRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid="hub-edit">
+          <IconMedia />
+          <strong>Editar vídeo</strong>
+          <span>Novo projeto ou continue um recente</span>
+        </button>
+        <button className="hub-card" onClick={() => setPost({})} data-testid="hub-news">
+          <IconNews />
+          <strong>Buscar e criar matéria</strong>
+          <span>Pesquise a notícia e gere a legenda do Reels</span>
+        </button>
+        <button className="hub-card" onClick={() => setPostador(true)} data-testid="hub-postador">
+          <IconSend />
+          <strong>Postador de notícias</strong>
+          <span>Pautas do dia, matéria do site e post em vídeo</span>
+        </button>
+        <button className="hub-card" onClick={() => setDl(true)} data-testid="hub-download">
+          <IconDownload />
+          <strong>Baixar vídeo</strong>
+          <span>Cole o link do Reels e já edite</span>
+        </button>
+        <button className="hub-card" onClick={() => setTrends(true)} data-testid="hub-trends">
+          <IconTrend />
+          <strong>Trends do momento</strong>
+          <span>Em alta, Reels virais e hashtags</span>
+        </button>
+      </section>
+      {dl && <DownloadDialog onClose={() => setDl(false)} />}
+      {postador && <PostadorDialog onClose={() => setPostador(false)} />}
+      {post && <PostDialog initialQuery={post.query} onClose={() => setPost(null)} />}
+      {trends && (
+        <TrendsDialog
+          onClose={() => setTrends(false)}
+          onCreateStory={(q) => {
+            setTrends(false);
+            setPost({ query: q });
+          }}
+        />
+      )}
+
+      <section className="home-new" ref={newRef}>
         <div className="home-new-head">
           <h2>Novo projeto</h2>
           <input

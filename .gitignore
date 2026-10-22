@@ -7,3 +7,15 @@ playwright-report/
 .DS_Store
 .vite/
 e2e/.fixtures/
+
+# chaves locais (nunca vão para o GitHub)
+.env
+.env.*
+!.env.example
+!.env.app
+
+# dados da automação do Postador (vivem no branch autopost-dados, não no código)
+autopost-dados/
+
+# logos que o teste de encerramento envia para a pasta brand/
+brand/logo-vermelha-teste*

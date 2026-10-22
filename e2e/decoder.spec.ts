@@ -17,9 +17,9 @@ test('decodificador sequencial = mesmo quadro do <video>', async ({ page }) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const load = (m: string) => import(/* @vite-ignore */ m) as Promise<any>;
     const { SequentialDecoder } = await load('/src/engine/sequentialDecoder.ts');
-    const ed = (window as unknown as { __editor: { getState(): { media: Record<string, { name: string; url: string }> } } }).__editor;
+    const ed = (window as unknown as { __editor: { getState(): { media: Record<string, { id: string; name: string; url: string }> } } }).__editor;
     const m = Object.values(ed.getState().media).find((x) => x.name.startsWith(fileName))!;
-    const dec = await SequentialDecoder.create(m.url);
+    const dec = await SequentialDecoder.create(m);
     if (!dec) return { ok: false, diffs: [] as number[], timing: 0 };
     const v = document.createElement('video');
     v.muted = true;
@@ -48,7 +48,7 @@ test('decodificador sequencial = mesmo quadro do <video>', async ({ page }) => {
     }
     dec.dispose();
     // tempo para decodificar 6 s em sequência (30 fps)
-    const dec2 = await SequentialDecoder.create(m.url);
+    const dec2 = await SequentialDecoder.create(m);
     const t0 = performance.now();
     for (let i = 0; i < 180; i++) await dec2.frameAt(i / 30);
     const timing = performance.now() - t0;

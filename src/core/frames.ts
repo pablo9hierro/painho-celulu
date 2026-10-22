@@ -99,6 +99,8 @@ export interface FrameLogoState {
   opacity: number;
 }
 export const FRAME_LOGO_DEFAULT: FrameLogoState = { hidden: false, dx: 0, dy: 0, opacity: 1 };
+/** logo horizontal no cabeçalho das molduras (desligada a pedido: só o fundo) */
+export const FRAME_HEADER_LOGO = false;
 
 /** Retângulo padrão da logo do cabeçalho (`ratio` = largura/altura da logo horizontal). */
 export function frameLogoBox(def: FrameDef, W: number, H: number, ratio: number) {
@@ -115,7 +117,9 @@ export function frameLogoBox(def: FrameDef, W: number, H: number, ratio: number)
 }
 
 /** Onde a logo da moldura está (com o ajuste do usuário); null se escondida. */
-export function frameLogoRect(clip: { frame: string; logo?: FrameLogoState }, W: number, H: number, ratio: number) {
+export function frameLogoRect(clip: { frame: string; logo?: FrameLogoState }, W: number, H: number, ratio: number): { x: number; y: number; w: number; h: number } | null {
+  // a logo do cabeçalho saiu das molduras (fica só o fundo com a logo passando atrás)
+  if (!FRAME_HEADER_LOGO) return null;
   const st = clip.logo ?? FRAME_LOGO_DEFAULT;
   if (st.hidden) return null;
   const b = frameLogoBox(getFrame(clip.frame), W, H, ratio);

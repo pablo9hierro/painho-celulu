@@ -33,6 +33,7 @@ import { FRAME_LOGO_DEFAULT, frameLogoRect, type FrameLogoState } from '../../co
 import { IconTrash } from '../icons';
 import { getPreset } from '../../core/presets';
 import { ensureBrandAssets, LOGO_RATIO, onBrandLoaded } from '../../render/brandAssets';
+import { onStampChange } from '../../render/stampSettings';
 import { TextEditOverlay } from './TextEditOverlay';
 
 let liveCanvas: HTMLCanvasElement | null = null;
@@ -116,6 +117,7 @@ export function Stage() {
     });
     const unsubPreview = preview.onInvalidate(() => (needsRender.current = true));
     const unsubBrand = onBrandLoaded(() => (needsRender.current = true));
+    const unsubStamp = onStampChange(() => (needsRender.current = true));
     void ensureBrandAssets();
     void document.fonts.ready.then(() => (needsRender.current = true));
     return () => {
@@ -123,6 +125,7 @@ export function Stage() {
       unsubStore();
       unsubPreview();
       unsubBrand();
+      unsubStamp();
       if (liveCanvas === canvasRef.current) liveCanvas = null;
     };
   }, []);

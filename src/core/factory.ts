@@ -165,7 +165,9 @@ export function createTextClip(p: Project, presetId: string, start: number): Tex
       width: pr.size.w * W,
       height,
       rotation: 0,
-      opacity: 1,
+      opacity: pr.opacity ?? 1,
+      // post animado: o quadro inteiro
+      ...(pr.fullFrame ? { x: W / 2, y: H / 2, width: W, height: H } : {}),
     },
     keyframes: [],
     animIn: { ...pr.animIn },
@@ -188,7 +190,8 @@ export function createBlurClip(
     trackId: '',
     name: shape === 'ellipse' ? 'Desfoque oval' : 'Desfoque',
     start,
-    duration: graphicDuration(p, start, null),
+    // 5 s: as duas bordas ficam à vista na timeline para esticar/encolher (sanfona)
+    duration: graphicDuration(p, start, 5),
     transform: { ...rect, rotation: 0, opacity: 1 },
     keyframes: [],
     animIn: { ...noAnim },

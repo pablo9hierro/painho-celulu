@@ -391,6 +391,7 @@ function drawBlur(ctx: C, clip: BlurClip, w: number, h: number, scale: number) {
   const ch = ctx.canvas.height;
   const radius = (clip.intensity / 100) * 60 * scale;
   const pad = clip.mode === 'blur' ? Math.ceil(radius * 2) : 0;
+  const bwMode = clip.mode === 'bw';
   const x0 = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.x)) - pad));
   const y0 = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.y)) - pad));
   const x1 = Math.min(cw, Math.ceil(Math.max(...pts.map((p) => p.x)) + pad));
@@ -410,7 +411,27 @@ function drawBlur(ctx: C, clip: BlurClip, w: number, h: number, scale: number) {
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (clip.mode === 'blur') {
+  if (bwMode) {
+    // filtro preto e branco sobre o que está por baixo
+    const k = Math.min(1, clip.intensity / 100);
+    if (typeof (ctx as { filter?: unknown }).filter === 'string') {
+      ctx.filter = `grayscale(${k.toFixed(2)})`;
+      ctx.drawImage(scratch!, 0, 0, bw, bh, x0, y0, bw, bh);
+      ctx.filter = 'none';
+    } else {
+      // aparelhos sem filtro no canvas: converte pixel a pixel
+      const img = sc.getImageData(0, 0, bw, bh);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const y = 0.2126 * d[i]! + 0.7152 * d[i + 1]! + 0.0722 * d[i + 2]!;
+        d[i] = d[i]! + (y - d[i]!) * k;
+        d[i + 1] = d[i + 1]! + (y - d[i + 1]!) * k;
+        d[i + 2] = d[i + 2]! + (y - d[i + 2]!) * k;
+      }
+      sc.putImageData(img, 0, 0);
+      ctx.drawImage(scratch!, 0, 0, bw, bh, x0, y0, bw, bh);
+    }
+  } else if (clip.mode === 'blur') {
     // borda estendida: desenha a cópia esticada por baixo para evitar halo escuro
     ctx.filter = `blur(${radius.toFixed(1)}px)`;
     ctx.drawImage(scratch!, 0, 0, bw, bh, x0 - pad, y0 - pad, bw + pad * 2, bh + pad * 2);

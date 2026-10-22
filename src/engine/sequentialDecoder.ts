@@ -3,22 +3,30 @@
  *
  * Posicionar um <video> quadro a quadro obriga o aparelho a redecodificar desde
  * o último quadro-chave a cada quadro (muito lento em vídeos de celular). Aqui o
- * MP4 é lido uma única vez (mp4box) e entregue em ordem ao decodificador de
- * hardware (WebCodecs VideoDecoder). O quadro devolvido para o instante t é o
- * mesmo que o <video> mostraria em t — o resultado visual é idêntico.
+ * MP4 é entregue em ordem ao decodificador de hardware (WebCodecs VideoDecoder).
+ * O quadro devolvido para o instante t é o mesmo que o <video> mostraria em t.
  *
- * Se o arquivo não for MP4/MOV ou o codec não for suportado, `create` devolve
- * null e a exportação usa o método antigo (posicionar o <video>).
+ * Memória: o arquivo NÃO é carregado inteiro. Lê-se só o índice (mp4index) e os
+ * dados das amostras em pequenos blocos, sob demanda — vídeos longos funcionam
+ * no celular. Se o índice falhar (MP4 fragmentado etc.), usa o mp4box com o
+ * arquivo inteiro apenas para arquivos pequenos; senão devolve null e a
+ * exportação usa o <video> (mais lento, mas sem estourar a memória).
  */
 import MP4Box, { type MP4Sample, type MP4VideoTrack } from 'mp4box';
+import type { MediaAsset } from '../core/model';
+import { mediaBlob } from '../platform/mediaBlob';
+import { indexMp4, readSamples, type Mp4Sample, type Mp4Track } from './mp4index';
 
-interface Sample {
-  data: Uint8Array;
+interface Meta {
   /** tempo de apresentação em microssegundos */
   ts: number;
   dur: number;
   key: boolean;
 }
+
+/** limite do caminho antigo (arquivo inteiro na memória) */
+const MEMORY_DEMUX_LIMIT = 200 * 1024 * 1024;
+const READ_AHEAD = 48;
 
 function description(file: ReturnType<typeof MP4Box.createFile>, track: MP4VideoTrack): Uint8Array | undefined {
   const trak = file.getTrackById(track.id);
@@ -33,21 +41,31 @@ function description(file: ReturnType<typeof MP4Box.createFile>, track: MP4Video
   return undefined;
 }
 
-/** Rotação gravada pela câmera (matriz do track), em múltiplos de 90°. */
-function rotationOf(m: ArrayLike<number>): number {
+function rotationOfMatrix(m: ArrayLike<number>): number {
   const a = (m[0] ?? 65536) / 65536;
   const b = (m[1] ?? 0) / 65536;
   const deg = Math.round((Math.atan2(b, a) * 180) / Math.PI / 90) * 90;
   return ((deg % 360) + 360) % 360;
 }
 
-export type Demuxed = { track: MP4VideoTrack; samples: Sample[]; desc?: Uint8Array };
+/** Fonte das amostras: índice + leitura parcial, ou tudo na memória (caminho antigo). */
+type Source =
+  | { kind: 'index'; blob: Blob; track: Mp4Track }
+  | { kind: 'mem'; data: Uint8Array[] };
 
-function demux(buffer: ArrayBuffer): Promise<Demuxed | null> {
+export interface Demuxed {
+  meta: Meta[];
+  source: Source;
+  config: VideoDecoderConfig;
+  rotation: number;
+}
+
+function memoryDemux(buffer: ArrayBuffer): Promise<Demuxed | null> {
   return new Promise((resolve) => {
     const file = MP4Box.createFile();
     let track: MP4VideoTrack | null = null;
-    const samples: Sample[] = [];
+    const meta: Meta[] = [];
+    const data: Uint8Array[] = [];
     file.onError = () => resolve(null);
     file.onReady = (info) => {
       track = info.videoTracks[0] ?? null;
@@ -57,7 +75,8 @@ function demux(buffer: ArrayBuffer): Promise<Demuxed | null> {
     };
     file.onSamples = (_id, _u, list: MP4Sample[]) => {
       for (const s of list) {
-        samples.push({ data: s.data, ts: (s.cts * 1e6) / s.timescale, dur: (s.duration * 1e6) / s.timescale, key: s.is_sync });
+        meta.push({ ts: (s.cts * 1e6) / s.timescale, dur: (s.duration * 1e6) / s.timescale, key: s.is_sync });
+        data.push(s.data);
       }
     };
     const ab = buffer as ArrayBuffer & { fileStart: number };
@@ -68,10 +87,38 @@ function demux(buffer: ArrayBuffer): Promise<Demuxed | null> {
     } catch {
       return resolve(null);
     }
-    if (!track) return resolve(null);
+    if (!track || !meta.length) return resolve(null);
     const t = track as MP4VideoTrack;
-    resolve(samples.length ? { track: t, samples, desc: description(file, t) } : null);
+    resolve({
+      meta,
+      source: { kind: 'mem', data },
+      config: {
+        codec: t.codec.startsWith('vp08') ? 'vp8' : t.codec,
+        codedWidth: t.video.width,
+        codedHeight: t.video.height,
+        description: description(file, t),
+        hardwareAcceleration: 'no-preference',
+      },
+      rotation: rotationOfMatrix(t.matrix),
+    });
   });
+}
+
+async function demux(m: MediaAsset): Promise<Demuxed | null> {
+  const blob = await mediaBlob(m);
+  const idx = await indexMp4(blob);
+  const track = idx?.video;
+  if (track) {
+    const ts = track.timescale;
+    return {
+      meta: track.samples.map((s: Mp4Sample) => ({ ts: (s.cts * 1e6) / ts, dur: (s.dur * 1e6) / ts, key: s.sync })),
+      source: { kind: 'index', blob, track },
+      config: { codec: track.codec, codedWidth: track.width, codedHeight: track.height, description: track.description, hardwareAcceleration: 'no-preference' },
+      rotation: track.rotation,
+    };
+  }
+  if (blob.size > MEMORY_DEMUX_LIMIT) return null;
+  return memoryDemux(await blob.arrayBuffer());
 }
 
 export class SequentialDecoder {
@@ -87,40 +134,31 @@ export class SequentialDecoder {
   private canvas: HTMLCanvasElement | null = null;
   /** apresentação do 1º quadro: o <video> considera esse instante como 0 */
   private origin: number;
+  /** dados já lidos à frente (índice → bytes) */
+  private ahead = new Map<number, Uint8Array>();
+  private gen = 0;
 
-  private constructor(
-    private readonly samples: Sample[],
-    private readonly config: VideoDecoderConfig,
-    private readonly rotation: number,
-  ) {
-    this.origin = Math.min(...samples.map((s) => s.ts));
+  private constructor(private readonly d: Demuxed) {
+    let o = Infinity;
+    for (const s of d.meta) if (s.ts < o) o = s.ts;
+    this.origin = o;
     this.createDecoder();
   }
 
-  /** `cache`: leitura do arquivo compartilhada entre trechos do mesmo vídeo */
-  static async create(url: string, cache?: Map<string, Promise<Demuxed | null>>): Promise<SequentialDecoder | null> {
+  /** `cache`: índice compartilhado entre trechos do mesmo vídeo */
+  static async create(m: MediaAsset, cache?: Map<string, Promise<Demuxed | null>>): Promise<SequentialDecoder | null> {
     if (typeof VideoDecoder === 'undefined') return null;
     try {
-      let p = cache?.get(url);
+      let p = cache?.get(m.id);
       if (!p) {
-        p = fetch(url)
-          .then((r) => r.arrayBuffer())
-          .then(demux)
-          .catch(() => null);
-        cache?.set(url, p);
+        p = demux(m).catch(() => null);
+        cache?.set(m.id, p);
       }
       const d = await p;
       if (!d) return null;
-      const config: VideoDecoderConfig = {
-        codec: d.track.codec.startsWith('vp08') ? 'vp8' : d.track.codec,
-        codedWidth: d.track.video.width,
-        codedHeight: d.track.video.height,
-        description: d.desc,
-        hardwareAcceleration: 'no-preference',
-      };
-      const sup = await VideoDecoder.isConfigSupported(config);
+      const sup = await VideoDecoder.isConfigSupported(d.config);
       if (!sup.supported) return null;
-      return new SequentialDecoder(d.samples, config, rotationOf(d.track.matrix));
+      return new SequentialDecoder(d);
     } catch {
       return null;
     }
@@ -137,11 +175,25 @@ export class SequentialDecoder {
         this.wake?.();
       },
     });
-    this.decoder.configure(this.config);
+    this.decoder.configure(this.d.config);
+  }
+
+  /** Bytes da amostra `i` (lê um bloco à frente quando precisa). */
+  private async dataFor(i: number): Promise<Uint8Array> {
+    const src = this.d.source;
+    if (src.kind === 'mem') return src.data[i]!;
+    let b = this.ahead.get(i);
+    if (!b) {
+      this.ahead = await readSamples(src.blob, src.track.samples, i, Math.min(this.d.meta.length, i + READ_AHEAD));
+      b = this.ahead.get(i)!;
+    }
+    this.ahead.delete(i);
+    return b;
   }
 
   /** Recomeça a decodificação a partir do quadro-chave anterior a `target`. */
   private restart(target: number) {
+    this.gen++;
     if (this.decoder.state !== 'closed') this.decoder.close();
     for (const f of this.queue) f.close();
     this.queue = [];
@@ -149,9 +201,11 @@ export class SequentialDecoder {
     this.current = null;
     this.flushed = false;
     this.flushing = false;
+    this.ahead.clear();
     let k = 0;
-    for (let i = 0; i < this.samples.length; i++) {
-      const s = this.samples[i]!;
+    const meta = this.d.meta;
+    for (let i = 0; i < meta.length; i++) {
+      const s = meta[i]!;
       if (s.key && s.ts <= target) k = i;
     }
     this.next = k;
@@ -163,6 +217,7 @@ export class SequentialDecoder {
     const target = this.origin + t * 1e6 + 500; // meio milissegundo de tolerância
     if (target < this.lastTarget - 1000 || this.lastTarget === -Infinity) this.restart(target);
     this.lastTarget = target;
+    const meta = this.d.meta;
     for (;;) {
       if (this.error) {
         // o navegador recolhe decodificadores ociosos: recria a partir deste ponto
@@ -178,11 +233,16 @@ export class SequentialDecoder {
       if (this.queue.length) break; // o próximo quadro já é posterior a t
       if (this.flushed && this.decoder.decodeQueueSize === 0 && !this.queue.length) break; // fim do arquivo
       // alimenta o decodificador mantendo uma fila curta
-      while (this.next < this.samples.length && this.decoder.decodeQueueSize < 12) {
-        const s = this.samples[this.next++]!;
-        this.decoder.decode(new EncodedVideoChunk({ type: s.key ? 'key' : 'delta', timestamp: s.ts, duration: s.dur, data: s.data }));
+      const gen = this.gen;
+      while (this.next < meta.length && this.decoder.decodeQueueSize < 12) {
+        const i = this.next;
+        const data = await this.dataFor(i);
+        if (gen !== this.gen || this.decoder.state === 'closed') break;
+        this.next = i + 1;
+        const s = meta[i]!;
+        this.decoder.decode(new EncodedVideoChunk({ type: s.key ? 'key' : 'delta', timestamp: s.ts, duration: s.dur, data }));
       }
-      if (this.next >= this.samples.length && !this.flushed && !this.flushing) {
+      if (this.next >= meta.length && !this.flushed && !this.flushing) {
         // NÃO espera o flush aqui: o decodificador de hardware só tem alguns quadros
         // disponíveis; se ficarmos parados segurando quadros, ele nunca termina
         // (travava no fim da exportação). Os quadros seguem sendo entregues/liberados.
@@ -209,7 +269,7 @@ export class SequentialDecoder {
     }
     const frame = this.current ?? this.queue[0] ?? null;
     if (!frame) return null;
-    if (!this.rotation) return frame;
+    if (!this.d.rotation) return frame;
     return this.rotated(frame);
   }
 
@@ -217,7 +277,8 @@ export class SequentialDecoder {
   private rotated(frame: VideoFrame): HTMLCanvasElement {
     const w = frame.displayWidth;
     const h = frame.displayHeight;
-    const swap = this.rotation === 90 || this.rotation === 270;
+    const rot = this.d.rotation;
+    const swap = rot === 90 || rot === 270;
     if (!this.canvas) this.canvas = document.createElement('canvas');
     const c = this.canvas;
     c.width = swap ? h : w;
@@ -225,16 +286,18 @@ export class SequentialDecoder {
     const ctx = c.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.translate(c.width / 2, c.height / 2);
-    ctx.rotate((this.rotation * Math.PI) / 180);
+    ctx.rotate((rot * Math.PI) / 180);
     ctx.drawImage(frame, -w / 2, -h / 2, w, h);
     return c;
   }
 
   dispose() {
+    this.gen++;
     if (this.decoder.state !== 'closed') this.decoder.close();
     for (const f of this.queue) f.close();
     this.queue = [];
     this.current?.close();
     this.current = null;
+    this.ahead.clear();
   }
 }

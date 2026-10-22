@@ -7,6 +7,19 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ProjectSchema } from '../src/core/model';
 import { API_PORT, ensureDirs, ffmpegPaths, ROOT } from './config';
+import { registerNews } from './news';
+import { registerDownload } from './download';
+import { registerPautas } from './pautas';
+import { registerIgTokens } from './igTokens';
+
+// chaves locais (ex.: OPENROUTER_API_KEY) — arquivo fora do GitHub
+for (const f of ['.env.local', '.env']) {
+  try {
+    process.loadEnvFile(path.join(ROOT, f));
+  } catch {
+    /* arquivo opcional */
+  }
+}
 import { getDb, now } from './db';
 import {
   brandFile,
@@ -40,6 +53,10 @@ const app = express();
 app.disable('x-powered-by');
 
 const json = express.json({ limit: '25mb' });
+registerNews(app, json);
+registerDownload(app);
+registerPautas(app, json);
+registerIgTokens(app);
 const asyncH =
   (fn: (req: Request, res: Response) => Promise<unknown> | unknown) => (req: Request, res: Response, next: NextFunction) =>
     Promise.resolve(fn(req, res)).catch(next);

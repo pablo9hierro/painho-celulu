@@ -22,7 +22,8 @@ test('galeria de manchetes em tamanho real', async ({ page }) => {
     // módulos servidos pelo Vite no navegador
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const load = (m: string) => import(/* @vite-ignore */ m) as Promise<any>;
-    const { HEADLINE_PRESETS } = await load('/src/core/presets.ts');
+    const { HEADLINE_PRESETS: ALL } = await load('/src/core/presets.ts');
+    const HEADLINE_PRESETS = (ALL as { id: string; hidden?: boolean }[]).filter((p) => !p.hidden);
     const { createProject, createTextClip } = await load('/src/core/factory.ts');
     const { drawHeadline } = await load('/src/render/headlines.ts');
     const { ensureFonts } = await load('/src/render/fonts.ts');

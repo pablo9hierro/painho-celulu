@@ -167,7 +167,8 @@ export const BlurClipSchema = z.object({
   type: z.literal('blur'),
   ...VisualBase,
   shape: z.enum(['rect', 'ellipse']),
-  mode: z.enum(['blur', 'pixelate']),
+  /** blur/pixelate = desfoque; bw = filtro preto e branco (camada de ajuste) */
+  mode: z.enum(['blur', 'pixelate', 'bw']),
   /** 0–100 */
   intensity: num.min(0).max(100),
 });

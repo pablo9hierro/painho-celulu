@@ -5,8 +5,9 @@
  */
 import type { MediaAsset } from '../core/model';
 import { setLogoOverride } from '../render/brandAssets';
+import { BUNDLED_BASIC, BUNDLED_LOGOS } from '../platform/bundledBrand';
 import horizontalUrl from '../assets/pn-logo-horizontal.png';
-import roundUrl from '../assets/pn-logo-round.png';
+import roundUrl from '../assets/pn-logo-round-fina.png';
 import normalUrl from '../assets/pn-logo-normal.png';
 
 export type FrameLogoKind = 'horizontal' | 'round' | 'outro';
@@ -25,7 +26,8 @@ export function getFrameLogo(kind: FrameLogoKind): string {
 
 function urlFor(id: string, media: Record<string, MediaAsset>): string | null {
   if (id === BUILTIN) return null;
-  return media[id]?.url ?? null;
+  // logos embutidas no app valem mesmo antes da lista de mídia carregar
+  return media[id]?.url ?? [...BUNDLED_LOGOS, ...BUNDLED_BASIC].find((b) => b.id === id)?.url ?? null;
 }
 
 /** Aplica as logos escolhidas (chamado ao abrir o editor e ao trocar a padrão). */

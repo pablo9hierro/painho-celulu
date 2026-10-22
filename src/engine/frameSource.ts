@@ -100,7 +100,7 @@ export async function prepareFrameSource(project: Project, media: Record<string,
         const id = it.clip.id;
         if (decoders.has(id) || videos.has(id)) continue;
         const url = urls.get(id)!;
-        const dec = await SequentialDecoder.create(url, demuxCache);
+        const dec = await SequentialDecoder.create(media[(it.clip as VideoClip).mediaId]!, demuxCache);
         if (dec) decoders.set(id, dec);
         else videos.set(id, await loadVideo(url));
       }

@@ -7,12 +7,12 @@ import type { BlurClip, Clip, FrameClip, ImageClip, Project, ShapeClip, Sponsors
 import { removeCrop } from '../../core/geometry';
 import { FORMATS, isVisual } from '../../core/model';
 import { getPreset } from '../../core/presets';
-import { FRAME_LOGO_DEFAULT, getFrame, type FrameLogoState } from '../../core/frames';
-import { BRAND_SWATCHES, PN } from '../../core/brand';
+import { getFrame } from '../../core/frames';
+import { BRAND_SWATCHES } from '../../core/brand';
 import { clearKeyframes, effectiveTransform, patchClip, setTransformAt, toggleKeyframeAt } from '../../core/edit';
 import { setSpeed, trimEnd } from '../../core/timeline';
 import { getEditor, setAutoKey, useEditor } from '../../state/store';
-import { detachAudio, fitSelection, removeImageBackground, resetClip } from '../commands';
+import { deleteKeyframe, detachAudio, fitSelection, removeImageBackground, resetClip } from '../commands';
 import { IconClose, IconKeyframe } from '../icons';
 
 export function Inspector({ onClose }: { onClose: () => void }) {
@@ -37,7 +37,7 @@ export function Inspector({ onClose }: { onClose: () => void }) {
       {clip.type === 'frame' && <FrameSection clip={clip} />}
       {clip.type === 'video' && <VideoSection clip={clip} />}
       {clip.type === 'image' && <ImageSection clip={clip} />}
-      {clip.type === 'blur' && <BlurSection clip={clip} />}
+      {clip.type === 'blur' && (clip.mode === 'bw' ? <FilterSection clip={clip} /> : <BlurSection clip={clip} />)}
       {clip.type === 'sponsors' && <SponsorsSection clip={clip} />}
       {clip.type === 'shape' && <ShapeSection clip={clip} />}
       {(clip.type === 'video' || clip.type === 'audio') && <SpeedSection clip={clip} />}
@@ -185,49 +185,34 @@ function FrameSection({ clip }: { clip: FrameClip }) {
   const def = getFrame(clip.frame);
   return (
     <Section title="Moldura">
-      <p className="hint">{def.description} Cores e logo seguem o padrão Primeiras Notícias. Para trocar, escolha outra moldura no painel Manchetes.</p>
+      <p className="hint">{def.description} Cores seguem o padrão Primeiras Notícias. Para trocar, escolha outra moldura no painel Manchetes.</p>
       {def.ticker && (
         <label className="field">
           <span>Texto do letreiro</span>
           <textarea className="input" rows={2} value={clip.text} onChange={(e) => patch(clip.id, { text: e.target.value } as Partial<FrameClip>, `ft-${clip.id}`)} />
         </label>
       )}
-      <FrameLogoControls clip={clip} />
     </Section>
   );
 }
 
-/** Logo do cabeçalho da moldura: opacidade, tirar/voltar e posição original. */
-function FrameLogoControls({ clip }: { clip: FrameClip }) {
-  const lg = clip.logo ?? FRAME_LOGO_DEFAULT;
-  const setLogo = (v: Partial<FrameLogoState>, merge?: string) => patch(clip.id, { logo: { ...lg, ...v } } as Partial<FrameClip>, merge);
-  const moved = lg.dx !== 0 || lg.dy !== 0;
+/** Opacidade do item no instante da agulha (marca d'água, selos, manchetes). */
+function OpacitySlider({ clip }: { clip: VisualClip }) {
+  const time = useEditor((s) => s.time);
+  const tr = effectiveTransform(clip, time);
   return (
-    <div className="field" data-testid="frame-logo-controls">
-      <span>Logo da moldura</span>
-      <p className="hint">Toque na logo no vídeo para selecionar: arraste para mover ou use a lixeira para tirar.</p>
-      {!lg.hidden && (
-        <Slider
-          label="Opacidade"
-          value={lg.opacity}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(v) => setLogo({ opacity: v }, `flo-${clip.id}`)}
-          format={(v) => `${Math.round(v * 100)}%`}
-        />
-      )}
-      <div className="row-gap wrap">
-        <button className="btn sm" onClick={() => setLogo({ hidden: !lg.hidden })} data-testid="frame-logo-toggle">
-          {lg.hidden ? 'Mostrar logo' : 'Tirar logo'}
-        </button>
-        {moved && !lg.hidden && (
-          <button className="btn sm ghost" onClick={() => setLogo({ dx: 0, dy: 0 })}>
-            Voltar ao lugar
-          </button>
-        )}
-      </div>
-    </div>
+    <Slider
+      label="Opacidade"
+      value={tr.opacity}
+      min={0.05}
+      max={1}
+      step={0.01}
+      onChange={(v) => {
+        const s = getEditor();
+        apply((p) => setTransformAt(p, clip.id, s.time, { ...effectiveTransform(clip, s.time), opacity: v }, s.autoKey), `op-${clip.id}`);
+      }}
+      format={(v) => `${Math.round(v * 100)}%`}
+    />
   );
 }
 
@@ -238,7 +223,8 @@ function TextSection({ clip }: { clip: TextClip }) {
   if (preset.uses.length === 0) {
     return (
       <Section title="Selo">
-        <p className="hint">Selo oficial com logo, símbolo do Instagram e {PN.handle}. Posicione e redimensione direto no vídeo.</p>
+        <p className="hint">{preset.description} Posicione e redimensione direto no vídeo.</p>
+        <OpacitySlider clip={clip} />
       </Section>
     );
   }
@@ -265,6 +251,7 @@ function TextSection({ clip }: { clip: TextClip }) {
       </Section>
       <Section title="Texto · formatação">
         <Slider label="Corpo" value={clip.style.fontScale} min={0.4} max={2} step={0.05} onChange={(v) => setStyle({ fontScale: v }, `fs-${clip.id}`)} format={(v) => `${Math.round(v * 100)}%`} />
+        <OpacitySlider clip={clip} />
         <div className="row-gap">
           <Seg
             value={clip.style.align}
@@ -449,7 +436,17 @@ function BlurSection({ clip }: { clip: BlurClip }) {
         ]}
         onChange={(v) => patch(clip.id, { mode: v } as Partial<BlurClip>)}
       />
-      <Slider label="Intensidade" value={clip.intensity} min={1} max={100} step={1} onChange={(v) => patch(clip.id, { intensity: v } as Partial<BlurClip>, `bi-${clip.id}`)} />
+      <Slider label="Intensidade do desfoque" value={clip.intensity} min={1} max={100} step={1} onChange={(v) => patch(clip.id, { intensity: v } as Partial<BlurClip>, `bi-${clip.id}`)} />
+    </Section>
+  );
+}
+
+/** Filtro (preto e branco) é outra coisa: só a intensidade do filtro, sem forma nem desfoque. */
+function FilterSection({ clip }: { clip: BlurClip }) {
+  return (
+    <Section title="Filtro · Preto e branco">
+      <Slider label="Intensidade do filtro" value={clip.intensity} min={0} max={100} step={1} onChange={(v) => patch(clip.id, { intensity: v } as Partial<BlurClip>, `fi-${clip.id}`)} format={(v) => `${Math.round(v)}%`} />
+      <p className="hint">0% = cores normais · 100% = preto e branco total. Estique ou encolha o item na timeline para escolher o trecho.</p>
     </Section>
   );
 }
@@ -511,6 +508,22 @@ function ShapeSection({ clip }: { clip: ShapeClip }) {
   );
 }
 
+/** Nó do Pan/Crop selecionado na timeline: editar (mexendo no item) ou excluir. */
+function SelectedNode({ clip }: { clip: VisualClip }) {
+  const kfSel = useEditor((s) => s.kfSel);
+  if (!kfSel || kfSel.clipId !== clip.id) return null;
+  return (
+    <div className="kf-selected" data-testid="kf-selected">
+      <span>
+        ◆ Nó em <strong>{(clip.start + kfSel.t).toFixed(2)} s</strong> selecionado — mova, redimensione ou corte o item para editar este nó.
+      </span>
+      <button className="btn sm danger" onClick={() => deleteKeyframe(clip.id, kfSel.t)} data-testid="kf-delete">
+        Excluir nó
+      </button>
+    </div>
+  );
+}
+
 /** Event Pan/Crop (Vegas): liga a gravação automática de nós ao mexer no item. */
 function PanCropToggle({ count }: { count: number }) {
   const autoKey = useEditor((s) => s.autoKey);
@@ -558,6 +571,7 @@ function TransformSection({ clip, time }: { clip: VisualClip; time: number }) {
       }
     >
       <PanCropToggle count={clip.keyframes.length} />
+      <SelectedNode clip={clip} />
       <div className="num-grid">
         <Num label="X" value={tr.x} onChange={set('x')} mergeKey="x" />
         <Num label="Y" value={tr.y} onChange={set('y')} mergeKey="y" />

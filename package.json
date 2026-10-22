@@ -21,7 +21,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "autopost": "tsx server/autopost/run.ts"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",

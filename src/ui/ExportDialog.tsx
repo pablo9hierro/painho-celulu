@@ -18,7 +18,7 @@ const QUALITY = [
   { id: 'light', label: 'Leve', crf: 24 },
 ] as const;
 
-export function ExportDialog({ onClose }: { onClose: () => void }) {
+export function ExportDialog({ onClose, onPost }: { onClose: () => void; onPost?: (videoFile: string) => void }) {
   const project = useEditor((s) => s.project)!;
   const duration = projectDuration(project);
   const [res, setRes] = useState<'full' | 'hd'>('full');
@@ -218,6 +218,13 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   <button className="btn ghost" onClick={() => setResult(null)}>
                     Nova exportação
                   </button>
+                </div>
+                {onPost && (
+                  <button className="btn primary wide post-next" onClick={() => onPost(result.file)} data-testid="go-post">
+                    Seguir para postagem · escrever a matéria
+                  </button>
+                )}
+                <div>
                 </div>
               </div>
             )}
