@@ -15,11 +15,15 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
 
+    /** a tela em uso (o serviço do Postador acorda o código do app por ela) */
+    private static volatile MainActivity current;
+
     private static final int BG = Color.parseColor("#111316");
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(KeepAlivePlugin.class);
+        registerPlugin(PostadorPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Mesmo comportamento em qualquer Android (o 15 força "edge-to-edge"):
@@ -46,6 +50,31 @@ public class MainActivity extends BridgeActivity {
         WebView webView = getBridge().getWebView();
         webView.getSettings().setTextZoom(100);
         webView.setBackgroundColor(BG);
+        current = this;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (current == this) current = null;
+        super.onDestroy();
+    }
+
+    /** Postador: mantém o código do app rodando mesmo com a tela bloqueada */
+    static void wakeWebView() {
+        MainActivity a = current;
+        if (a == null || a.getBridge() == null) return;
+        a.runOnUiThread(() -> {
+            WebView wv = a.getBridge().getWebView();
+            wv.onResume();
+            wv.resumeTimers();
+        });
+    }
+
+    /** dispara um evento no código do app (ex.: "postador-tick") */
+    static void dispatch(String event) {
+        MainActivity a = current;
+        if (a == null || a.getBridge() == null) return;
+        a.runOnUiThread(() -> a.getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('" + event + "'))", null));
     }
 
     // Exportando: o WebView não pausa ao sair do app (a notificação mantém o processo vivo)
@@ -62,7 +91,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void keepRunning() {
-        if (!KeepAlivePlugin.active || getBridge() == null) return;
+        if (!(KeepAlivePlugin.active || PostadorService.running) || getBridge() == null) return;
         WebView wv = getBridge().getWebView();
         wv.onResume();
         wv.resumeTimers();

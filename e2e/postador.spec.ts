@@ -126,37 +126,19 @@ test('Postador: aba do site guarda o acesso e explica quando falta senha', async
   await expect(page.getByText(/Acesso OK|usuário e a senha|recusado|painel/).first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('postador-tab-auto')).toBeVisible();
   await page.getByTestId('postador-tab-auto').click();
-  await expect(page.getByText('cron único')).toBeVisible();
+  await expect(page.getByTestId('auto-box')).toContainText('Postador automático (neste celular)');
+  await expect(page.getByText('No PC é só para ver como fica')).toBeVisible();
 });
 
-test('Tons: áudios cadastrados no app vão para a automação com os nomes certos', async ({ page }) => {
-  const { audio } = fixtures();
-  const puts: { path: string; body: { content: string; branch: string } }[] = [];
-  await page.route('https://api.github.com/**', async (r) => {
-    const url = r.request().url();
-    if (r.request().method() === 'PUT') {
-      puts.push({ path: decodeURIComponent(url.split('/contents/')[1]!), body: r.request().postDataJSON() });
-      return r.fulfill({ status: 201, json: { content: {} } });
-    }
-    if (url.includes('/git/ref/heads/autopost-dados')) return r.fulfill({ json: { object: { sha: 'x' } } });
-    return r.fulfill({ status: 404, json: { message: 'Not Found' } });
-  });
+test('Automação: liga, ensaia e mostra horários e o que fez (painel do celular)', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('hub-postador').click();
-  await page.getByTestId('postador-tab-tons').click();
-  const sync = page.getByTestId('tone-sync');
-  await sync.locator('input[type=password]').fill('github_pat_teste');
-  await page.getByTestId('tone-name').fill('Matéria policial');
-  await page.getByTestId('tone-add').click();
-  const card = page.getByTestId('tone-card').last();
-  await card.locator('input[type=file]').setInputFiles(audio);
-  await expect(card.locator('input[aria-label="Nome do áudio"]').last()).toHaveValue('tensao-grave', { timeout: 60_000 });
-  await card.locator('input[aria-label="Nome do áudio"]').last().fill('matéria policial 1');
-  await page.getByTestId('tone-sync-go').click();
-  await expect(page.getByTestId('tone-sync-status')).toContainText('Automação atualizada', { timeout: 30_000 });
-  const idx = puts.find((p) => p.path === 'tons/tons.json')!;
-  const j = JSON.parse(Buffer.from(idx.body.content, 'base64').toString('utf8')) as { audios: { tom: string; nome: string; arquivo: string }[] };
-  const a = j.audios.find((x) => x.tom === 'Matéria policial')!;
-  expect(a.nome).toBe('matéria policial 1');
-  expect(puts.some((p) => p.path === a.arquivo && p.body.branch === 'autopost-dados')).toBe(true);
+  await page.getByTestId('postador-tab-auto').click();
+  const box = page.getByTestId('auto-box');
+  await expect(box).toBeVisible();
+  await page.getByTestId('auto-on').check();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(true);
+  await expect(page.locator('p', { hasText: 'Próximos horários' })).toContainText(/\d\d:\d\d/);
+  await page.getByTestId('auto-on').uncheck();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(false);
 });

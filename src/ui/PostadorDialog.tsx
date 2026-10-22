@@ -18,10 +18,11 @@ import type { SiteStory } from '../news/siteWriter';
 import type { SiteNews } from '../news/websg';
 import { fetchPhoto, findPautas, getIgConfig, getSiteConfig, instagramStatus, setIgConfig, setSiteConfig, siteDelete, siteList, sitePublish, siteTest, writeSite, type IgStatus } from '../news/postadorClient';
 import { native } from '../news/client';
+import { autopostReport, getAutoConfig, setAutoConfig, startAutopostClock, tick, type AutoConfig } from '../news/autopostApp';
+import { postadorNative } from '../platform/postadorNative';
 import { aiReady, getAiKey, getFx, setAiKey } from '../news/client';
 import { addSpend, brl, type Fx } from '../news/cost';
 import { loadTones, resolveTone, saveTones, tonesForAi, type Tone } from '../news/tones';
-import { syncTones, type GithubCfg } from '../news/tonesSync';
 import { createStoryVideo } from './storyVideo';
 import { waitReady } from './importer';
 import { confirmDialog } from './dialogs';
@@ -36,7 +37,6 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 /** relatório que o cron publica a cada rodada (branch autopost-dados do repositório) */
-const REPORT_URL = 'https://raw.githubusercontent.com/pablo9hierro/painho-celulu/autopost-dados/relatorio.json';
 
 function ago(iso: string | null): string {
   if (!iso) return 'sem data';
@@ -416,32 +416,6 @@ function SiteTab({ busy, setBusy }: { busy: string | null; setBusy: (b: string |
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-const GH_KEY = 'pn-github';
-const getGh = (): GithubCfg => {
-  try {
-    return { repo: 'pablo9hierro/painho-celulu', token: '', ...(JSON.parse(localStorage.getItem(GH_KEY) ?? '{}') as Partial<GithubCfg>) };
-  } catch {
-    return { repo: 'pablo9hierro/painho-celulu', token: '' };
-  }
-};
-const setGh = (c: GithubCfg) => {
-  try {
-    localStorage.setItem(GH_KEY, JSON.stringify(c));
-  } catch {
-    /* sem armazenamento */
-  }
-};
-
-/** bytes do áudio da biblioteca (para mandar à automação) */
-async function readAudio(mediaId: string): Promise<{ data: Uint8Array; ext: string }> {
-  const m = await mediaApi.get(mediaId);
-  const r = await fetch(m.url);
-  if (!r.ok) throw new Error(`Não consegui ler o áudio "${m.name}".`);
-  const blob = await r.blob();
-  const ext = (/\.(\w{2,4})$/.exec(m.name)?.[1] ?? (blob.type.includes('mpeg') ? 'mp3' : blob.type.includes('wav') ? 'wav' : 'm4a')).toLowerCase();
-  return { data: new Uint8Array(await blob.arrayBuffer()), ext };
-}
-
 function TonesTab() {
   const notify = useEditor((s) => s.notify);
   const [tones, setTones] = useState<Tone[]>(loadTones);
@@ -449,26 +423,9 @@ function TonesTab() {
   const [uploading, setUploading] = useState<string | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
-  const [gh, setGhState] = useState(getGh);
-  const [sync, setSync] = useState<string | null>(null);
-  const sendToAutomation = async (list: Tone[]) => {
-    const cfg = getGh();
-    if (!cfg.token) return;
-    setSync('Enviando os tons para a automação…');
-    try {
-      const r = await syncTones(cfg, list, readAudio, setSync);
-      setSync(`Automação atualizada: ${r.enviados} áudio(s) em ${new Set(r.indice.map((x) => x.tom)).size} tom(ns).`);
-    } catch (e) {
-      setSync(`Não enviou: ${(e as Error).message}`);
-    }
-  };
-  // depois de mexer, manda sozinho (espera 3 s sem mudanças)
-  const timer = useRef<number | null>(null);
   const update = (t: Tone[]) => {
     setTones(t);
     saveTones(t);
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => void sendToAutomation(t), 3000);
   };
   useEffect(() => () => audio.current?.pause(), []);
 
@@ -482,8 +439,6 @@ function TonesTab() {
         setTones((cur) => {
           const next = cur.map((t) => (t.id === toneId ? { ...t, tracks: [...t.tracks, { mediaId: m.id, name: f.name.replace(/\.[^.]+$/, '') }] } : t));
           saveTones(next);
-          if (timer.current) window.clearTimeout(timer.current);
-          timer.current = window.setTimeout(() => void sendToAutomation(next), 3000);
           return next;
         });
       }
@@ -525,16 +480,6 @@ function TonesTab() {
           Criar tom
         </button>
       </div>
-      <div className="tone-card" data-testid="tone-sync">
-        <strong className="small">Automação (posts automáticos)</strong>
-        <span className="small muted">Para o cron usar estes áudios, informe o repositório e um token do GitHub (permissão Contents: leitura e escrita). Depois de cada mudança os tons são enviados sozinhos.</span>
-        <input className="input" placeholder="dono/repositório" value={gh.repo} onChange={(e) => setGhState({ ...gh, repo: e.target.value.trim() })} />
-        <input className="input" type="password" placeholder="Token do GitHub (github_pat_...)" value={gh.token} onChange={(e) => setGhState({ ...gh, token: e.target.value.trim() })} />
-        <button className="btn sm" onClick={() => { setGh(gh); void sendToAutomation(tones); }} data-testid="tone-sync-go">
-          Salvar e enviar tons para a automação
-        </button>
-        {sync && <span className="small" data-testid="tone-sync-status">{sync}</span>}
-      </div>
       {tones.length === 0 && <p className="small muted">Nenhum tom ainda: os posts saem sem trilha.</p>}
       {tones.map((t) => (
         <div key={t.id} className="tone-card" data-testid="tone-card">
@@ -571,16 +516,6 @@ function TonesTab() {
 }
 
 // ------------------------------------------------------------------ automação
-
-interface Report {
-  atualizado: string;
-  slots: string[];
-  source: string;
-  stories: number;
-  measured: number;
-  rules: string;
-  top: { title: string; r: number; site?: number; ig?: number }[];
-}
 
 /** Instagram: situação dos tokens (renovação automática) e, no app, onde colar os tokens */
 function InstagramBox() {
@@ -629,43 +564,99 @@ function InstagramBox() {
 }
 
 function AutoTab() {
-  const [rep, setRep] = useState<Report | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const notify = useEditor((s) => s.notify);
+  const [cfg, setCfg] = useState<AutoConfig>(getAutoConfig);
+  const [rep, setRep] = useState(autopostReport);
+  const [nat, setNat] = useState<{ ligado: boolean; semEconomiaBateria: boolean } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const refresh = () => {
+    setRep(autopostReport());
+    void postadorNative.status().then(setNat);
+  };
   useEffect(() => {
-    fetch(`${REPORT_URL}?t=${Date.now()}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then(setRep)
-      .catch(() => setErr('A automação ainda não rodou (ou o relatório não está publicado).'));
+    refresh();
+    const id = window.setInterval(refresh, 5000);
+    return () => window.clearInterval(id);
   }, []);
+  const save = async (c: AutoConfig) => {
+    setCfg(c);
+    setAutoConfig(c);
+    if (c.ativo) {
+      await postadorNative.start().catch((e: Error) => notify(e.message, 'error'));
+      startAutopostClock();
+    } else await postadorNative.stop();
+    refresh();
+  };
+  const run = async (what: 'postar' | 'estatistica') => {
+    setBusy(what);
+    try {
+      await tick(what);
+    } catch (e) {
+      notify((e as Error).message, 'error');
+    } finally {
+      setBusy(null);
+      refresh();
+    }
+  };
   return (
     <div className="auto-tab small">
       <InstagramBox />
-      <p>
-        A automação roda sozinha a cada 30 min no GitHub (cron único): lê os acessos do site e o desempenho no Instagram, aprende o que dá audiência e, ~25 min antes dos horários de pico, escolhe a melhor pauta, escreve, publica no site e posta o vídeo no Instagram.
-      </p>
-      {err && <p className="muted">{err}</p>}
-      {rep && (
-        <>
-          <p>
-            <strong>Próximos disparos (Brasília):</strong> {rep.slots.join(' · ')}
-            <br />
-            <span className="muted">Base dos horários: {rep.source}. Atualizado {ago(rep.atualizado)}.</span>
+      <div className="tone-card" data-testid="auto-box">
+        <strong>Postador automático (neste celular)</strong>
+        {!postadorNative.disponivel && <p className="post-warn small">No PC é só para ver como fica: a postagem automática roda no app do celular.</p>}
+        <label className="check-row">
+          <input type="checkbox" checked={cfg.ativo} onChange={(e) => void save({ ...cfg, ativo: e.target.checked })} data-testid="auto-on" />
+          Ligado (roda sozinho, mesmo com a tela bloqueada)
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={cfg.valendo} onChange={(e) => void save({ ...cfg, valendo: e.target.checked })} data-testid="auto-real" />
+          Publicar de verdade no site e no Instagram (desligado = ensaio)
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={cfg.sitePublicar} onChange={(e) => void save({ ...cfg, sitePublicar: e.target.checked })} />
+          No site, já como "Publicado" (desligado = "Revisão")
+        </label>
+        <label className="field">
+          <span>Máximo de posts por dia</span>
+          <input className="input" type="number" min={1} max={12} value={cfg.maxDia} onChange={(e) => void save({ ...cfg, maxDia: Math.max(1, Math.min(12, Number(e.target.value) || 4)) })} />
+        </label>
+        {postadorNative.disponivel && nat && (
+          <p className={nat.ligado && nat.semEconomiaBateria ? 'muted' : 'post-warn small'}>
+            Serviço: {nat.ligado ? 'ligado ✓' : 'desligado'} · bateria: {nat.semEconomiaBateria ? 'sem restrição ✓' : 'com economia (pode parar com a tela bloqueada)'}
           </p>
-          <p>
-            Matérias postadas: {rep.stories} · medidas (36 h+): {rep.measured}
-          </p>
-          {rep.rules && <pre className="auto-rules">{rep.rules}</pre>}
-          {rep.top.length > 0 && (
-            <ol>
-              {rep.top.map((t, i) => (
-                <li key={i}>
-                  {t.title} — {t.r}x a média{typeof t.site === 'number' ? ` · ${t.site} acessos` : ''}
-                  {typeof t.ig === 'number' ? ` · ${t.ig} views no Instagram` : ''}
-                </li>
-              ))}
-            </ol>
+        )}
+        <div className="row-gap wrap">
+          {postadorNative.disponivel && nat && !nat.semEconomiaBateria && (
+            <button className="btn sm" onClick={() => void postadorNative.pedirBateria().then(refresh)}>
+              Liberar bateria sem restrição
+            </button>
           )}
-        </>
+          <button className="btn sm" disabled={!!busy} onClick={() => void run('estatistica')}>
+            {busy === 'estatistica' ? 'Lendo…' : 'Atualizar estatística'}
+          </button>
+          <button className="btn sm primary" disabled={!!busy} onClick={() => void run('postar')} data-testid="auto-post-now">
+            {busy === 'postar' ? 'Postando…' : cfg.valendo ? 'Postar agora' : 'Testar agora (ensaio)'}
+          </button>
+        </div>
+      </div>
+      <p>
+        <strong>Próximos horários (Brasília):</strong> {rep.slots.join(' · ')}
+        <br />
+        <span className="muted">Base: {rep.source}. Se o celular estiver dormindo ou falhar, tenta de novo por até 1h30 depois do horário (3 tentativas).</span>
+      </p>
+      <p>
+        Matérias postadas: {rep.stories} · medidas (36 h+): {rep.measured}
+      </p>
+      {rep.rules && <pre className="auto-rules">{rep.rules}</pre>}
+      {rep.log.length > 0 && (
+        <details open>
+          <summary className="muted">O que ele fez</summary>
+          <ul className="small muted">
+            {rep.log.map((l, i) => (
+              <li key={i}>{l}</li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

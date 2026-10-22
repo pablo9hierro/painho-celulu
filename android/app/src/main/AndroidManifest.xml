@@ -28,6 +28,15 @@
         </activity>
 
         <service
+            android:name=".PostadorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Postagem automática de notícias nos horários de pico, com a tela bloqueada" />
+        </service>
+
+        <service
             android:name=".ExportService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
@@ -53,5 +62,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Postador automático: serviço permanente e sem economia de bateria -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

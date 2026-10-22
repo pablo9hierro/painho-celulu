@@ -86,3 +86,21 @@ describe('renovação do token do Facebook', () => {
     expect(r.warnings.join(' ')).toMatch(/gere outro/);
   });
 });
+
+describe('postador no celular: horário com novas tentativas', () => {
+  it('abre no horário, segue aberto por 1h30 e fecha depois de 3 tentativas ou de usado', async () => {
+    const { openSlot } = await import('./autopostApp');
+    const { emptyState, postingSlots } = await import('./learning');
+    const st = emptyState();
+    const slot = postingSlots(st).slots[0]!; // ex.: 06:35
+    const [hh, mm] = slot.split(':').map(Number);
+    const at = (min: number) => new Date(Date.UTC(2026, 9, 23, hh! + 3, mm! + min));
+    const key = `2026-10-23 ${slot}`;
+    expect(openSlot(st, at(0), {})).toBe(key);
+    expect(openSlot(st, at(60), {})).toBe(key); // celular estava dormindo: ainda tenta
+    expect(openSlot(st, at(100), {})).toBeNull(); // passou de 1h30
+    expect(openSlot(st, at(10), { [key]: 3 })).toBeNull(); // 3 tentativas
+    st.slotsUsed.push(key);
+    expect(openSlot(st, at(10), {})).toBeNull(); // já postou
+  });
+});

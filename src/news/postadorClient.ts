@@ -131,7 +131,7 @@ const b64 = (d: Uint8Array) => {
 
 /** transporte do app: o Android guarda os cookies da sessão sozinho */
 let jsGate = false;
-const nativeSiteHttp: SiteHttp = {
+export const nativeSiteHttp: SiteHttp = {
   async send(r) {
     // o WEBSG só responde a quem passa no teste de JavaScript (cookie js_ok=1)
     if (!jsGate) {
@@ -157,7 +157,7 @@ const nativeSiteHttp: SiteHttp = {
 };
 
 /** capa no formato do painel (1200x675, recorte central) feita no próprio aparelho */
-async function canvasCover(foto: { data: Uint8Array; type: string; name: string }) {
+export async function canvasCover(foto: { data: Uint8Array; type: string; name: string }) {
   const bmp = await createImageBitmap(new Blob([foto.data as BlobPart], { type: foto.type }));
   const c = document.createElement('canvas');
   c.width = 1200;
@@ -169,7 +169,7 @@ async function canvasCover(foto: { data: Uint8Array; type: string; name: string 
   return { data: new Uint8Array(await blob.arrayBuffer()), type: 'image/jpeg', name: foto.name.replace(/\.\w+$/, '') + '.jpg' };
 }
 
-const withBase = (c: WebsgConfig): WebsgConfig => ({ ...c, base: c.base || 'https://primeirasnoticias.com.br/websg/' });
+export const withBase = (c: WebsgConfig): WebsgConfig => ({ ...c, base: c.base || 'https://primeirasnoticias.com.br/websg/' });
 
 async function siteApi<T>(path: string, body: unknown): Promise<T> {
   return api<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(body as object), site: getSiteConfig() }) });
@@ -239,7 +239,7 @@ export function setIgConfig(c: IgDeviceConfig) {
   }
 }
 
-const nativeIgHttp: IgHttp = {
+export const nativeIgHttp: IgHttp = {
   async get(url) {
     const r = await CapacitorHttp.get({ url, connectTimeout: 15_000, readTimeout: 30_000 });
     return typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
