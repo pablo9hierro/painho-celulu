@@ -29,6 +29,8 @@ public class PostadorService extends Service {
     private static final long TICK_MS = 5 * 60 * 1000L;
 
     static volatile boolean running = false;
+    /** texto da notificação (o que o Postador está fazendo agora) */
+    private static volatile String texto = "Postador ligado: continua mesmo fora do app ou com a tela bloqueada";
 
     private PowerManager.WakeLock wakeLock;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -44,6 +46,7 @@ public class PostadorService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         running = true;
+        if (intent != null && intent.getStringExtra("texto") != null) texto = intent.getStringExtra("texto");
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Postador automático", NotificationManager.IMPORTANCE_LOW));
@@ -53,8 +56,9 @@ public class PostadorService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n = new NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("Postador automático ligado")
-            .setContentText("Posta nos horários de pico, mesmo com a tela bloqueada")
+            .setContentTitle("Primeiras Notícias · Postador")
+            .setContentText(texto)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(texto))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pi)

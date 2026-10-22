@@ -6,6 +6,9 @@ import { App } from './ui/App';
 import { useEditor } from './state/store';
 import { Capacitor } from '@capacitor/core';
 
+// tons e músicas que vêm no app: prontos antes de qualquer post (a lista aparece na hora)
+void import('./news/defaultTones').then((m) => m.ensureDefaultTones());
+
 // Postador automático: só no app do celular (o web é prévia)
 if (Capacitor.isNativePlatform()) {
   void import('./news/autopostApp').then(async ({ getAutoConfig, startAutopostClock }) => {

@@ -66,7 +66,7 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
         model: 'google/gemini-2.5-flash-lite',
         steps: ['Escrita'],
         costUsd: 0.0004,
-        tom: 'Policial',
+        tom: 'Crime',
         audio: 'tensao-grave',
         destaque: 'prende dois suspeitos',
       },
@@ -81,10 +81,12 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
 
   // TONS: cria "Policial" e coloca um áudio com nome
   await page.getByTestId('postador-tab-tons').click();
-  await page.getByTestId('tone-name').fill('Policial');
+  // os 3 tons que vêm no app aparecem na hora
+  await expect(page.getByTestId('tone-card')).toHaveCount(3);
+  await page.getByTestId('tone-name').fill('Crime');
   await page.getByTestId('tone-add').click();
-  const card = page.getByTestId('tone-card');
-  await expect(card).toHaveCount(1);
+  await expect(page.getByTestId('tone-card')).toHaveCount(4);
+  const card = page.getByTestId('tone-card').last();
   await card.locator('input[type=file]').setInputFiles(audio);
   await expect(card.locator('input[aria-label="Nome do áudio"]')).toHaveValue('tensao-grave', { timeout: 60_000 });
 
@@ -98,7 +100,7 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
   await page.getByTestId('postador-write').click();
   const story = page.getByTestId('postador-story');
   await expect(story).toContainText('destaque: “prende dois suspeitos”');
-  await expect(story).toContainText('tom: Policial');
+  await expect(story).toContainText('tom: Crime');
   // a IA recebeu os tons cadastrados (para escolher na mesma chamada)
   expect(JSON.stringify(sentTones)).toContain('tensao-grave');
 
@@ -127,11 +129,11 @@ test('Postador: aba do site guarda o acesso e explica quando falta senha', async
   await expect(page.getByText(/Acesso OK|usuário e a senha|recusado|painel/).first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('postador-tab-auto')).toBeVisible();
   await page.getByTestId('postador-tab-auto').click();
-  await expect(page.getByTestId('auto-box')).toContainText('das 6h às 23h');
+  await expect(page.getByTestId('auto-box')).toContainText('De manhã, às 7h');
   await expect(page.getByText(/No PC é só para ver como fica/)).toBeVisible();
 });
 
-test('Automação simples: um botão liga/desliga; blog ao longo do dia e Instagram com a melhor', async ({ page }) => {
+test('Automação simples: um botão liga/desliga; lote do blog de manhã e Instagram com a melhor', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('hub-postador').click();
   await page.getByTestId('postador-tab-auto').click();
@@ -140,7 +142,7 @@ test('Automação simples: um botão liga/desliga; blog ao longo do dia e Instag
   await sw.click();
   await expect(sw).toContainText('LIGADO');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(true);
-  await expect(page.getByTestId('auto-box')).toContainText('das 6h às 23h');
+  await expect(page.getByTestId('auto-box')).toContainText('De manhã, às 7h');
   await expect(page.getByText(/mais visualizações/)).toBeVisible();
   await expect(page.locator('b').filter({ hasText: /\d\d:\d\d/ }).first()).toBeVisible();
   await sw.click();
@@ -181,6 +183,7 @@ test('Tons que vêm no app: 17 trilhas com o melhor trecho marcado; desliza para
   await page.evaluate(() => {
     localStorage.removeItem('pn-tons-padrao-v1');
     localStorage.removeItem('pn-tons-padrao-v2');
+    localStorage.removeItem('pn-tons-padrao-v3');
     localStorage.removeItem('pn-tones-v1');
   });
   await page.getByTestId('hub-postador').click();
@@ -235,4 +238,56 @@ test('Configurações: um lugar só, salva e continua lá; ordem dos botões da 
   // collab automática com @portalnewsjampa já vem preenchida
   await expect(page.getByTestId('cfg-ig-collab')).toHaveValue('portalnewsjampa');
   await page.evaluate(() => ['pn-ai-key', 'pn-websg', 'pn-instagram'].forEach((k) => localStorage.removeItem(k)));
+});
+
+test('Instagram: lista das matérias publicadas com botão para postar na mão (as já postadas aparecem marcadas)', async ({ page }) => {
+  const agora = Date.now();
+  await page.route('**/api/site/list', (r) =>
+    r.fulfill({
+      json: {
+        news: [
+          { id: 46201, title: 'Prefeitura anuncia mutirão de saúde em João Pessoa', url: 'https://primeirasnoticias.com.br/n/46201', views: 820, status: 'Publicado', date: new Date(agora - 4 * 3600_000).toISOString() },
+          { id: 46200, title: 'Polícia prende suspeito de assalto em Bayeux', url: 'https://primeirasnoticias.com.br/n/46200', views: 300, status: 'Publicado', date: new Date(agora - 6 * 3600_000).toISOString() },
+          { id: 46199, title: 'Matéria em revisão', url: 'https://primeirasnoticias.com.br/n/46199', views: 0, status: 'Revisão', date: new Date(agora - 1 * 3600_000).toISOString() },
+        ],
+      },
+    }),
+  );
+  await page.goto('/');
+  await page.evaluate(() => {
+    localStorage.setItem('pn-websg', JSON.stringify({ base: 'https://primeirasnoticias.com.br', user: 'teste', pass: 'teste' }));
+    localStorage.setItem('pn-autopost-state', JSON.stringify({ v: 1, stories: [{ url: 'x', title: 'Polícia prende suspeito de assalto em Bayeux', keywords: [], postedAt: new Date().toISOString(), siteId: 46200, igId: '999' }] }));
+  });
+  await page.getByTestId('hub-postador').click();
+  await page.getByTestId('postador-tab-auto').click();
+  await page.getByTestId('ig-list-load').click();
+  const items = page.getByTestId('ig-item');
+  await expect(items).toHaveCount(2); // a em revisão fica de fora
+  await expect(items.nth(0)).toContainText('820 visualizações');
+  await expect(items.nth(0).getByTestId('ig-post')).toBeVisible();
+  await expect(items.nth(1)).toContainText('✓ no Instagram');
+  await expect(items.nth(1).getByTestId('ig-post')).toHaveCount(0);
+  await page.evaluate(() => ['pn-websg', 'pn-autopost-state'].forEach((k) => localStorage.removeItem(k)));
+});
+
+test('Post em vídeo com música que vem no app: entra na biblioteca e o vídeo sai COM a música no trecho certo', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/');
+  const r = await page.evaluate(async () => {
+    // módulos do app servidos pelo Vite (caminho só existe no navegador)
+    const load = (p: string) => import(/* @vite-ignore */ p);
+    type Api = { projects: { get(id: string): Promise<{ clips: { type: string }[] }> }; media: { get(id: string): Promise<{ status: string; duration: number }> } };
+    const sv = (await load('/src/ui/storyVideo.ts')) as { createStoryVideo(i: Record<string, unknown>): Promise<string> };
+    const api = (await load('/src/platform/api.ts')) as Api;
+    const id = await sv.createStoryVideo({ kicker: 'Policial', title: 'Teste de música', subtitle: 'Subtítulo curto.', audioId: 'pn-musica:dark-knight', audioStart: 86.5, audioDur: 15 });
+    const p = await api.projects.get(id);
+    const a = p.clips.find((c: { type: string }) => c.type === 'audio') as { mediaId: string; sourceIn: number; duration: number } | undefined;
+    const m = a ? await api.media.get(a.mediaId) : null;
+    return { tem: !!a, sourceIn: a?.sourceIn, dur: a?.duration, status: m?.status, total: m?.duration };
+  });
+  expect(r.tem).toBe(true);
+  expect(r.status).toBe('ready');
+  expect(r.sourceIn).toBe(86.5);
+  expect(r.dur).toBe(15);
+  expect(r.total!).toBeGreaterThan(140);
 });

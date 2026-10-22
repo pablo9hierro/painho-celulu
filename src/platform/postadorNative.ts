@@ -10,6 +10,7 @@ interface PostadorPlugin {
   stop(): Promise<void>;
   status(): Promise<{ ligado: boolean; semEconomiaBateria: boolean }>;
   pedirBateria(): Promise<void>;
+  aviso(o: { texto: string }): Promise<void>;
 }
 const Native = registerPlugin<PostadorPlugin>('Postador');
 const isNative = Capacitor.isNativePlatform();
@@ -20,4 +21,6 @@ export const postadorNative = {
   stop: () => (isNative ? Native.stop() : Promise.resolve()),
   status: () => (isNative ? Native.status() : Promise.resolve({ ligado: false, semEconomiaBateria: true })),
   pedirBateria: () => (isNative ? Native.pedirBateria() : Promise.resolve()),
+  /** texto da notificação fixa (também mantém o app trabalhando fora da tela) */
+  aviso: (texto: string) => (isNative ? Native.aviso({ texto }).catch(() => undefined) : Promise.resolve()),
 };

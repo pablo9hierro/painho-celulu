@@ -17,7 +17,8 @@ import { CITIES, type Pauta } from '../news/pautas';
 import type { SiteStory } from '../news/siteWriter';
 import type { SiteNews } from '../news/websg';
 import { fetchPhoto, findPautas, siteDelete, siteList, siteTest, writeSite } from '../news/postadorClient';
-import { autopostReport, getAutoConfig, setAutoConfig, startAutopostClock, tick } from '../news/autopostApp';
+import { autopostReport, BLOG_HOUR, BLOG_LOTE, getAutoConfig, instagramList, runJob, setAutoConfig, startAutopostClock, type Job } from '../news/autopostApp';
+import { PostadorStatusCard, useAutopostStatus } from './PostadorStatus';
 import { postadorNative } from '../platform/postadorNative';
 import { aiReady, getFx } from '../news/client';
 import { addSpend, brl, type Fx } from '../news/cost';
@@ -29,7 +30,10 @@ import { IconClose, IconSettings, IconTrash, IconUpload } from './icons';
 import { SettingsDialog } from './SettingsDialog';
 import { MusicTrim } from './MusicTrim';
 import { postToBlog } from '../news/blogPost';
-import { ensureDefaultTones } from '../news/defaultTones';
+import { ensureDefaultTones, trackUrl } from '../news/defaultTones';
+import { videoTexts } from '../news/videoTexts';
+import { aiChat } from '../news/openrouter';
+import { getAiKey } from '../news/client';
 
 type Tab = 'pautas' | 'site' | 'tons' | 'auto';
 const TABS: { id: Tab; label: string }[] = [
@@ -152,13 +156,17 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
     setBusy('video');
     setError(null);
     try {
+      await ensureDefaultTones();
       const tones = loadTones();
       const tone = resolveTone(tones, story.tom, story.audio, `${story.titulo} ${story.paragrafos.join(' ')}`, story.categoria);
+      if (!tone) throw new Error('Nenhuma música nos tons: o post não sai sem música.');
+      // título curto e direto + subtítulo inteiro (sem reticências)
+      const vt = await videoTexts(aiChat(getAiKey()), { titulo: story.titulo, subtitulo: story.subtitulo, texto: story.paragrafos.join(' '), palavras: story.palavrasChave, destaque: story.destaque }, { tone: false });
       const id = await createStoryVideo({
         kicker: story.categoria || story.minititulo || 'Notícia',
-        title: story.titulo,
-        subtitle: story.subtitulo,
-        keywords: [story.destaque ?? '', ...story.palavrasChave].filter(Boolean),
+        title: vt.titulo,
+        subtitle: vt.subtitulo,
+        keywords: [vt.destaque ?? '', ...story.palavrasChave].filter(Boolean),
         photo: await photo(story, open),
         audioId: tone?.track.mediaId ?? null,
         audioStart: tone?.track.inicio,
@@ -417,7 +425,6 @@ function TonesTab() {
   useEffect(() => () => audio.current?.pause(), []);
   const [seeding, setSeeding] = useState(false);
   useEffect(() => {
-    setSeeding(true);
     void ensureDefaultTones()
       .then(() => setTones(loadTones()))
       .catch((e: Error) => notify(`Tons padrão: ${e.message}`, 'error'))
@@ -449,8 +456,7 @@ function TonesTab() {
     audio.current?.pause();
     if (playing === mediaId) return setPlaying(null);
     try {
-      const m = await mediaApi.get(mediaId);
-      const a = new Audio(m.url);
+      const a = new Audio(await trackUrl(mediaId));
       audio.current = a;
       a.onended = () => setPlaying(null);
       await a.play();
@@ -532,16 +538,35 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
   const [on, setOn] = useState(getAutoConfig().ativo);
   const [rep, setRep] = useState(autopostReport);
   const [nat, setNat] = useState<{ ligado: boolean; semEconomiaBateria: boolean } | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const live = useAutopostStatus();
+  const [lista, setLista] = useState<Awaited<ReturnType<typeof instagramList>> | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  const [listBusy, setListBusy] = useState(false);
   const refresh = () => {
     setRep(autopostReport());
     void postadorNative.status().then(setNat);
   };
+  const loadList = async () => {
+    setListBusy(true);
+    setListErr(null);
+    try {
+      setLista(await instagramList());
+    } catch (e) {
+      setListErr((e as Error).message);
+    } finally {
+      setListBusy(false);
+    }
+  };
   useEffect(() => {
     refresh();
-    const id = window.setInterval(refresh, 5000);
+    const id = window.setInterval(refresh, 4000);
     return () => window.clearInterval(id);
   }, []);
+  // log e lista acompanham o trabalho ao vivo
+  useEffect(() => {
+    setRep(autopostReport());
+    if (!live.job && live.last && lista) void loadList();
+  }, [live.step, live.job]);
   const toggle = async () => {
     const next = !on;
     setOn(next);
@@ -552,49 +577,76 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
       // celular: precisa rodar com a tela bloqueada
       const s = await postadorNative.status();
       if (postadorNative.disponivel && !s.semEconomiaBateria) await postadorNative.pedirBateria();
-    } else await postadorNative.stop();
+    } else if (!live.job) await postadorNative.stop();
     refresh();
   };
-  const run = async (what: 'blog' | 'instagram') => {
-    setBusy(what);
-    try {
-      await tick(what);
-    } catch (e) {
-      notify((e as Error).message, 'error');
-    } finally {
-      setBusy(null);
-      refresh();
-    }
+  /** manda para a fila (continua fora da tela); o resultado aparece no status */
+  const run = (job: Job) => {
+    notify(live.job ? 'Entrou na fila: começa quando terminar o trabalho atual.' : 'Começou. Pode navegar pelo app: continua trabalhando.');
+    runJob(job).catch(() => undefined);
   };
   return (
     <div className="auto-tab">
+      <PostadorStatusCard />
       <button className={`btn wide auto-switch ${on ? 'primary' : ''}`} onClick={() => void toggle()} data-testid="auto-switch">
         {on ? 'AUTOMÁTICO LIGADO ✓ (toque para desligar)' : 'AUTOMÁTICO DESLIGADO (toque para ligar)'}
       </button>
       {!postadorNative.disponivel && <p className="post-warn small">No PC é só para ver como fica: o automático roda no app do celular.</p>}
-      {postadorNative.disponivel && on && nat && !nat.semEconomiaBateria && (
+      {postadorNative.disponivel && nat && !nat.semEconomiaBateria && (
         <p className="post-warn small">
-          O celular ainda economiza bateria no app e pode parar com a tela bloqueada.{' '}
+          O celular ainda economiza bateria no app e pode parar fora da tela.{' '}
           <button className="btn sm" onClick={() => void postadorNative.pedirBateria().then(refresh)}>Liberar</button>
         </p>
       )}
       <div className="tone-card" data-testid="auto-box">
         <strong>📰 Blog</strong>
-        <span className="small">De hora em hora, das 6h às 23h, pega a melhor notícia nova e publica no site.</span>
+        <span className="small">De manhã, às {BLOG_HOUR}h, publica de uma vez o lote do dia: até {BLOG_LOTE} melhores notícias novas que ainda não estão no site.</span>
         <span className="small muted">Hoje: {rep.blogHoje} publicada(s)</span>
-        <button className="btn sm" disabled={!!busy} onClick={() => void run('blog')} data-testid="auto-blog-now">
-          {busy === 'blog' ? 'Publicando…' : 'Publicar uma agora'}
+        <button className="btn sm" onClick={() => run({ kind: 'blog' })} data-testid="auto-blog-now">
+          Publicar uma agora
         </button>
       </div>
-      <div className="tone-card">
+      <div className="tone-card" data-testid="ig-box">
         <strong>📱 Instagram</strong>
         <span className="small">
           Nos horários de pico (<b>{rep.slots.join(' · ')}</b>) posta como Reels a matéria do blog que teve <b>mais visualizações</b>. Não posta todas.
         </span>
         <span className="small muted">Hoje: {rep.instagramHoje} Reels</span>
-        <button className="btn sm" disabled={!!busy} onClick={() => void run('instagram')} data-testid="auto-ig-now">
-          {busy === 'instagram' ? 'Postando…' : 'Postar a melhor agora'}
+        <button className="btn sm" onClick={() => run({ kind: 'instagram' })} data-testid="auto-ig-now">
+          Postar a melhor agora
         </button>
+        <div className="row-between">
+          <strong className="small">Matérias publicadas no blog</strong>
+          <button className="btn sm" disabled={listBusy} onClick={() => void loadList()} data-testid="ig-list-load">
+            {listBusy ? 'Carregando…' : lista ? 'Atualizar' : 'Mostrar lista'}
+          </button>
+        </div>
+        {listErr && <p className="error-text small">{listErr}</p>}
+        {lista && lista.length === 0 && <p className="small muted">Nenhuma matéria publicada encontrada.</p>}
+        {lista && (
+          <div className="post-cards" data-testid="ig-list">
+            {lista.map((n) => (
+              <div key={n.id} className="post-card" data-testid="ig-item">
+                <span className="post-card-body">
+                  <strong>{n.title}</strong>
+                  <span className="small muted">
+                    nº {n.id}
+                    {typeof n.views === 'number' ? ` · ${n.views} visualizações` : ''}
+                    {n.perHour !== null ? ` · ${n.perHour.toFixed(0)}/h` : ''}
+                    {n.date ? ` · ${new Date(n.date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+                  </span>
+                </span>
+                {n.noInstagram ? (
+                  <span className="small ok-text">✓ no Instagram</span>
+                ) : (
+                  <button className="btn sm primary" onClick={() => run({ kind: 'instagram', item: n })} data-testid="ig-post">
+                    Postar no Instagram
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <p className="small muted">
         Chaves e senhas: <button className="btn sm" onClick={openSettings} data-testid="auto-open-settings">⚙ Configurações</button>
@@ -602,7 +654,7 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
       {rep.log.length > 0 && (
         <details open>
           <summary className="small muted">O que ele fez</summary>
-          <ul className="small muted">
+          <ul className="small muted" data-testid="auto-log">
             {rep.log.map((l, i) => (
               <li key={i}>{l}</li>
             ))}

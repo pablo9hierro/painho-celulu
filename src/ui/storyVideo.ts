@@ -16,6 +16,7 @@ import { placeClip } from '../core/timeline';
 import { media as mediaApi, projects } from '../platform/api';
 import { markKeyword } from '../render/edicao';
 import { waitReady } from './importer';
+import { ensureTrackMedia } from '../news/defaultTones';
 
 export const STORY_FRAME = 'central';
 export const STORY_SECONDS = 15;
@@ -117,11 +118,10 @@ export async function createStoryVideo(input: StoryVideoInput): Promise<string> 
   }
   let audio: MediaAsset | null = null;
   if (input.audioId) {
-    try {
-      audio = await mediaApi.get(input.audioId);
-    } catch {
-      /* áudio apagado da biblioteca: o post sai sem trilha */
-    }
+    // música do app entra na biblioteca agora (uma vez); se não der, NÃO monta sem música
+    const id = await ensureTrackMedia(input.audioId);
+    audio = await mediaApi.get(id).catch(() => null);
+    if (!audio || audio.status !== 'ready') throw new Error('A música escolhida não carregou; o post não foi montado sem música.');
   }
   const p = buildStoryProject(input, photo, audio);
   await projects.create(p);

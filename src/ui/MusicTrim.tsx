@@ -4,14 +4,14 @@
  * A duração do post em vídeo segue o trecho.
  */
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { media as mediaApi } from '../platform/api';
+import { trackUrl } from '../news/defaultTones';
 
 const BINS = 300;
 const peaksCache = new Map<string, Promise<{ peaks: Float32Array; duration: number; url: string }>>();
 
 async function loadPeaks(mediaId: string) {
-  const m = await mediaApi.get(mediaId);
-  const buf = await (await fetch(m.url)).arrayBuffer();
+  const url = await trackUrl(mediaId);
+  const buf = await (await fetch(url)).arrayBuffer();
   const ctx = new OfflineAudioContext(1, 1, 22050);
   const audio = await ctx.decodeAudioData(buf);
   const data = audio.getChannelData(0);
@@ -25,7 +25,7 @@ async function loadPeaks(mediaId: string) {
     max = Math.max(max, p);
   }
   if (max > 0) for (let i = 0; i < BINS; i++) peaks[i]! /= max;
-  return { peaks, duration: audio.duration, url: m.url };
+  return { peaks, duration: audio.duration, url };
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;

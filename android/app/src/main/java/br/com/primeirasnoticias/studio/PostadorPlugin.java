@@ -36,6 +36,19 @@ public class PostadorPlugin extends Plugin {
         }
     }
 
+    /** mostra na notificação o que está sendo feito (liga o serviço se precisar) */
+    @PluginMethod
+    public void aviso(PluginCall call) {
+        try {
+            Intent i = new Intent(getContext(), PostadorService.class);
+            i.putExtra("texto", call.getString("texto", ""));
+            ContextCompat.startForegroundService(getContext(), i);
+        } catch (Exception e) {
+            // sem notificação: segue sem aviso
+        }
+        call.resolve();
+    }
+
     @PluginMethod
     public void stop(PluginCall call) {
         try {

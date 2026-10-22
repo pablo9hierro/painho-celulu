@@ -116,16 +116,18 @@ describe('automático: blog e Instagram separados', () => {
     expect(bestForInstagram(list, new Set([6]), now)!.item.id).toBe(2);
     expect(bestForInstagram([n(3, 0.5, 900)], new Set(), now)).toBeNull();
   });
-  it('blog: das 6h às 23h, uma por hora, tenta de novo em 20 min, até 12 no dia', async () => {
+  it('blog: lote da manhã (7h), uma vez por dia; se parou no meio, continua 20 min depois (até 12h)', async () => {
     const { blogDue } = await import('./autopostApp');
     const at = (hh: number, mm = 0) => new Date(`2026-10-23T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00-03:00`);
-    const vazio = { lastTry: null, lastOk: null, day: '', count: 0 };
-    expect(blogDue(vazio, at(5, 50))).toBe(false); // antes das 6h
-    expect(blogDue(vazio, at(6, 5))).toBe(true);
-    expect(blogDue({ ...vazio, lastOk: at(10).toISOString(), lastTry: at(10).toISOString() }, at(10, 40))).toBe(false); // menos de 1 h
-    expect(blogDue({ ...vazio, lastOk: at(10).toISOString(), lastTry: at(10).toISOString() }, at(11, 5))).toBe(true);
-    expect(blogDue({ ...vazio, lastOk: at(9).toISOString(), lastTry: at(10, 50).toISOString() }, at(11, 0))).toBe(false); // falhou há 10 min
-    expect(blogDue({ lastTry: null, lastOk: null, day: '2026-10-23', count: 12 }, at(15))).toBe(false); // limite do dia
-    expect(blogDue(vazio, at(23, 10))).toBe(false); // depois das 23h
+    const dia = '2026-10-23';
+    const vazio = { lastTry: null, day: '', count: 0, done: false };
+    expect(blogDue(vazio, at(6, 50))).toBe(false); // antes das 7h
+    expect(blogDue(vazio, at(7, 5))).toBe(true);
+    expect(blogDue({ ...vazio, day: '2026-10-22', count: 10, done: true }, at(7, 5))).toBe(true); // ontem não conta
+    expect(blogDue({ lastTry: at(7).toISOString(), day: dia, count: 4, done: false }, at(7, 10))).toBe(false); // acabou de tentar
+    expect(blogDue({ lastTry: at(7).toISOString(), day: dia, count: 4, done: false }, at(7, 25))).toBe(true); // continua o lote
+    expect(blogDue({ lastTry: at(7).toISOString(), day: dia, count: 10, done: false }, at(9))).toBe(false); // lote completo
+    expect(blogDue({ lastTry: at(7).toISOString(), day: dia, count: 3, done: true }, at(9))).toBe(false); // sem mais pautas boas
+    expect(blogDue(vazio, at(12, 10))).toBe(false); // depois das 12h não publica lote
   });
 });

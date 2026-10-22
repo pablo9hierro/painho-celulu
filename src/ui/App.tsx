@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ProjectsScreen } from './ProjectsScreen';
 import { Editor } from './Editor';
 import { Toast } from './Toast';
+import { PostadorStatusBar } from './PostadorStatus';
 import { DialogHost, confirmDialog } from './dialogs';
 import { exitApp, installBackButton } from '../platform/backButton';
 import { TooltipLayer } from './Tooltip';
@@ -48,6 +49,7 @@ export function App() {
     <>
       {serverIssue && <div className="banner-error">{serverIssue}</div>}
       {route.name === 'editor' ? <Editor key={route.id} projectId={route.id} /> : <ProjectsScreen />}
+      <PostadorStatusBar />
       <Toast />
       <DialogHost />
       <TooltipLayer />

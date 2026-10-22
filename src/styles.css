@@ -2522,3 +2522,12 @@ input[type='range'] {
 .music-trim { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: #0b1b3d; }
 .music-trim-wave { width: 100%; height: 56px; touch-action: none; cursor: grab; display: block; }
 .music-trim-wave:active { cursor: grabbing; }
+
+/* status ao vivo do Postador */
+.postador-status { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(31,139,255,0.12); }
+.postador-status.ok { background: rgba(60,180,90,0.14); }
+.postador-status.err { background: rgba(230,70,70,0.16); }
+.postador-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.15); overflow: hidden; }
+.postador-bar i { display: block; height: 100%; background: #1f8bff; transition: width .3s; }
+.postador-global { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 900; padding: 8px 12px; border-radius: 10px; background: #0b1b3d; color: #fff; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ok-text { color: #5bd17a; white-space: nowrap; }
