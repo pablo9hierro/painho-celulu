@@ -223,12 +223,16 @@ export interface IgDeviceConfig {
   /** token do Instagram (IGAA...): renovado sozinho no aparelho */
   igToken: string;
   meta: TokenMeta;
+  /** convidar para collab em todo Reel (separe por vírgula; até 3) */
+  collab: string;
 }
+/** convite de collab padrão */
+export const DEFAULT_COLLAB = 'portalnewsjampa';
 export function getIgConfig(): IgDeviceConfig {
   try {
-    return { userId: '', fbToken: '', igToken: '', meta: {}, ...(JSON.parse(localStorage.getItem(IG_KEY) ?? '{}') as Partial<IgDeviceConfig>) };
+    return { userId: '', fbToken: '', igToken: '', meta: {}, collab: DEFAULT_COLLAB, ...(JSON.parse(localStorage.getItem(IG_KEY) ?? '{}') as Partial<IgDeviceConfig>) };
   } catch {
-    return { userId: '', fbToken: '', igToken: '', meta: {} };
+    return { userId: '', fbToken: '', igToken: '', meta: {}, collab: DEFAULT_COLLAB };
   }
 }
 export function setIgConfig(c: IgDeviceConfig) {

@@ -63,24 +63,52 @@ async function retry<T>(fn: () => Promise<T>, log?: (m: string) => void, n = 5):
   }
 }
 
+/** @perfil → "perfil" (até 3, como o Instagram permite) */
+export function collabUsernames(list: string): string[] {
+  return [...new Set(list.split(/[\s,;]+/).map((x) => x.trim().replace(/^@/, '').toLowerCase()).filter((x) => /^[a-z0-9._]{1,30}$/.test(x)))].slice(0, 3);
+}
+
 /** Publica um Reel enviando o próprio arquivo MP4. Devolve o id do post. */
-export async function publishReel(http: IgHttp, c: IgConfig, video: Uint8Array, caption: string, opts: { coverAtMs?: number; shareToFeed?: boolean; log?: (m: string) => void } = {}): Promise<{ id: string; containerId: string }> {
+export async function publishReel(
+  http: IgHttp,
+  c: IgConfig,
+  video: Uint8Array,
+  caption: string,
+  opts: { coverAtMs?: number; shareToFeed?: boolean; log?: (m: string) => void; /** convite de collab (usernames sem @) */ collaborators?: string[] } = {},
+): Promise<{ id: string; containerId: string; collab: string[] }> {
   if (!c.userId || !c.token) throw new Error('Configure o ID da conta e o token do Instagram.');
   const log = opts.log;
-  const container = await retry(
-    async () =>
-      check<{ id: string; uri?: string }>(
-        await http.post(`${base(c)}/${c.userId}/media`, {
-          media_type: 'REELS',
-          upload_type: 'resumable',
-          caption: caption.slice(0, 2200),
-          share_to_feed: opts.shareToFeed === false ? 'false' : 'true',
-          ...(opts.coverAtMs !== undefined ? { thumb_offset: String(Math.round(opts.coverAtMs)) } : {}),
-          access_token: c.token,
-        }),
-      ),
-    log,
-  );
+  const create = (collab: string[]) =>
+    retry(
+      async () =>
+        check<{ id: string; uri?: string }>(
+          await http.post(`${base(c)}/${c.userId}/media`, {
+            media_type: 'REELS',
+            upload_type: 'resumable',
+            caption: caption.slice(0, 2200),
+            share_to_feed: opts.shareToFeed === false ? 'false' : 'true',
+            ...(opts.coverAtMs !== undefined ? { thumb_offset: String(Math.round(opts.coverAtMs)) } : {}),
+            // convite de collab: a outra conta aceita no app dela e o Reel aparece nos dois perfis
+            ...(collab.length ? { collaborators: JSON.stringify(collab) } : {}),
+            access_token: c.token,
+          }),
+        ),
+      log,
+      // com convite de collab, erro de convite não melhora tentando de novo
+      collab.length ? 2 : 5,
+    );
+  let collab = opts.collaborators ?? [];
+  let container: { id: string; uri?: string };
+  try {
+    container = await create(collab);
+  } catch (e) {
+    if (!collab.length) throw e;
+    // a collab não pode derrubar o post: tenta sem o convite
+    log?.(`Convite de collab recusado (${(e as Error).message}); postando sem collab.`);
+    collab = [];
+    container = await create(collab);
+  }
+  if (collab.length) log?.(`Convite de collab para @${collab.join(', @')}.`);
   log?.(`Container criado (${container.id}); enviando o vídeo (${(video.length / 1048576).toFixed(1)} MB)...`);
   const up = check<{ success?: boolean }>(
     await http.upload(container.uri || `https://rupload.facebook.com/ig-api-upload/v21.0/${container.id}`, { Authorization: `OAuth ${c.token}`, offset: '0', file_size: String(video.length) }, video),
@@ -89,7 +117,7 @@ export async function publishReel(http: IgHttp, c: IgConfig, video: Uint8Array, 
   await waitContainer(http, c, container.id, 300_000, log);
   const pub = await retry(async () => check<{ id: string }>(await http.post(`${base(c)}/${c.userId}/media_publish`, { creation_id: container.id, access_token: c.token })), log);
   log?.(`Reel publicado (${pub.id}).`);
-  return { id: pub.id, containerId: container.id };
+  return { id: pub.id, containerId: container.id, collab };
 }
 
 export async function account(http: IgHttp, c: IgConfig): Promise<{ id: string; username: string; followers_count?: number }> {

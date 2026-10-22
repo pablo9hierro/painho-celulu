@@ -1,65 +1,71 @@
 /**
- * POSTADOR AUTOMÁTICO NO CELULAR (só no app; o web é só para ver antes do APK).
+ * AUTOMÁTICO NO CELULAR (só no app; o web é só para ver antes do APK).
+ * Um botão só: ligado ou desligado. Ligado, faz DUAS coisas separadas:
  *
- * A cada "tique" (a cada 5 min, acordado pelo serviço nativo mesmo com a tela
- * bloqueada):
- *  1. renova os tokens quando for a hora;
- *  2. lê a estatística (acessos do site, pessoas no site agora, seguidores
- *     online no Instagram) e mede as matérias com 36 h+ (aprendizado);
- *  3. se for o horário de postar (~25 min antes de um pico), escolhe a melhor
- *     pauta, escreve a matéria (com destaque e tom), publica no site, monta o
- *     vídeo no próprio celular (com a trilha do tom) e posta o Reels.
- * Se falhar ou o celular estava "dormindo", tenta de novo nos próximos tiques
- * enquanto a janela do horário estiver aberta (até 3 tentativas por horário).
+ *  BLOG — ao longo do dia (de hora em hora, das 6h às 23h) captura as notícias,
+ *  escolhe a melhor pauta inédita (que ainda não está no site) e PUBLICA no blog.
+ *
+ *  INSTAGRAM — nos horários de pico dos seguidores, olha as últimas matérias
+ *  publicadas no blog (as do app e as da redação) e posta como Reels SÓ a que
+ *  teve melhor desempenho (visualizações por hora desde que saiu).
+ *
+ * O serviço nativo acorda o app a cada 5 min, mesmo com a tela bloqueada. Se
+ * algo falhar (internet, celular dormindo), tenta de novo nos próximos tiques.
  */
-import { capturePautas, sameStory, type Pauta } from './pautas';
+import { capturePautas, extractBlocks, sameStory, type Pauta } from './pautas';
 import { cachedTrends } from './trends';
 import { aiChat } from './openrouter';
-import { writeSiteStory } from './siteWriter';
 import { writeStory } from './writer';
 import { withTrendingHashtags } from './hashtags';
 import { styleCaption } from './unicodeStyle';
-import { addNews, listNews, siteActiveUsers } from './websg';
-import { mediaInsights, onlineFollowers, publishReel } from './instagram';
-import { brt, learnedBoost, measure, normalizeState, postingSlots, postsToday, recordActive, recordViews, report, writerRules, type LearnState } from './learning';
-import { loadTones, resolveTone, tonesForAi } from './tones';
+import { listNews, siteActiveUsers, type SiteNews } from './websg';
+import { mediaInsights, onlineFollowers, collabUsernames, publishReel } from './instagram';
+import { brt, learnedBoost, measure, normalizeState, postingSlots, recordActive, recordViews, report, type LearnState } from './learning';
+import { loadTones, noteTrackUse, resolveTone, tonesForAi, TRECHO_S } from './tones';
 import { maintainTokens } from './igToken';
+import { pickHighlight } from './siteWriter';
 import { getAiKey, nativeHttp, nativePost } from './client';
-import { canvasCover, fetchPhoto, getIgConfig, getSiteConfig, nativeIgHttp, nativePautaHttp, nativeSiteHttp, setIgConfig, withBase } from './postadorClient';
+import { getIgConfig, getSiteConfig, nativeIgHttp, nativePautaHttp, nativeSiteHttp, setIgConfig, withBase } from './postadorClient';
+import { firstPhoto, loadQueue, postToBlog } from './blogPost';
 import { createStoryVideo } from '../ui/storyVideo';
 import { exporter, media as mediaApi, projects } from '../platform/api';
 import { projectDuration } from '../core/timeline';
 import type { MediaAsset } from '../core/model';
+import type { Chat } from './writer';
 
 // ---------------------------------------------------------------- configuração e estado (no aparelho)
 
 export interface AutoConfig {
-  /** automação ligada */
+  /** automático ligado (blog ao longo do dia + Instagram nos picos) */
   ativo: boolean;
-  /** publica de verdade (false = ensaio: faz tudo menos publicar) */
-  valendo: boolean;
-  /** publica no site já como "Publicado" (false = "Revisão") */
-  sitePublicar: boolean;
-  maxDia: number;
 }
 const CFG_KEY = 'pn-autopost-cfg';
 const ST_KEY = 'pn-autopost-state';
 const RUN_KEY = 'pn-autopost-runs';
+const BLOG_KEY = 'pn-autopost-blog';
+
+/** blog: das 6h às 23h, de hora em hora, no máximo 12 por dia */
+export const BLOG_FROM = 6;
+export const BLOG_TO = 23;
+const BLOG_EVERY_MIN = 60;
+const BLOG_RETRY_MIN = 20;
+const BLOG_MAX_DAY = 12;
 const MAX_AGE_H = 12;
-/** depois do horário, continua tentando por este tanto (celular dormindo, sem internet...) */
+/** Instagram: depois do horário, continua tentando por 1h30 (até 3 vezes) */
 const WINDOW_MIN = 90;
 const MAX_TRIES = 3;
 
 export function getAutoConfig(): AutoConfig {
   try {
-    return { ativo: false, valendo: false, sitePublicar: true, maxDia: 4, ...(JSON.parse(localStorage.getItem(CFG_KEY) ?? '{}') as Partial<AutoConfig>) };
+    const c = JSON.parse(localStorage.getItem(CFG_KEY) ?? '{}') as Partial<AutoConfig>;
+    return { ativo: c.ativo === true };
   } catch {
-    return { ativo: false, valendo: false, sitePublicar: true, maxDia: 4 };
+    return { ativo: false };
   }
 }
 export function setAutoConfig(c: AutoConfig) {
   try {
-    localStorage.setItem(CFG_KEY, JSON.stringify(c));
+    localStorage.setItem(CFG_KEY, JSON.stringify({ ativo: c.ativo }));
   } catch {
     /* sem armazenamento */
   }
@@ -78,33 +84,39 @@ function saveState(st: LearnState) {
     /* sem armazenamento */
   }
 }
-/** tentativas por horário: "2026-10-22 20:35" → n */
-function getTries(): Record<string, number> {
+function readJson<T>(k: string, d: T): T {
   try {
-    return JSON.parse(localStorage.getItem(RUN_KEY) ?? '{}') as Record<string, number>;
+    return { ...d, ...(JSON.parse(localStorage.getItem(k) ?? '{}') as T) };
   } catch {
-    return {};
+    return d;
   }
 }
-function setTries(t: Record<string, number>) {
+function writeJson(k: string, v: unknown) {
   try {
-    const keep = Object.fromEntries(Object.entries(t).slice(-40));
-    localStorage.setItem(RUN_KEY, JSON.stringify(keep));
+    localStorage.setItem(k, JSON.stringify(v));
   } catch {
     /* sem armazenamento */
   }
 }
 
+/** controle do blog: última tentativa, quantas hoje */
+interface BlogCtl {
+  lastTry: string | null;
+  lastOk: string | null;
+  day: string;
+  count: number;
+}
+
 const log = (st: LearnState, m: string) => {
-  const line = `${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })} ${m}`;
+  const line = `${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} ${m}`;
   st.log.push(line);
   st.log = st.log.slice(-300);
-  console.log('[postador]', m);
+  console.log('[automático]', m);
 };
 
-// ---------------------------------------------------------------- horário (com tentativas)
+// ---------------------------------------------------------------- horários do Instagram (com tentativas)
 
-/** Horário em aberto: começou há pouco (até 90 min), não foi usado e ainda tem tentativa. */
+/** Horário em aberto: começou há pouco (até 1h30), não foi usado e ainda tem tentativa. */
 export function openSlot(st: LearnState, now: Date, tries: Record<string, number>): string | null {
   const { slots } = postingSlots(st);
   const { h, m, day } = brt(now);
@@ -116,6 +128,31 @@ export function openSlot(st: LearnState, now: Date, tries: Record<string, number
     if (nowMin >= t - 5 && nowMin <= t + WINDOW_MIN && !st.slotsUsed.includes(key) && (tries[key] ?? 0) < MAX_TRIES) return key;
   }
   return null;
+}
+
+/** Hora de postar no blog? (6h–23h, 1 por hora, 20 min para tentar de novo, até 12 no dia) */
+export function blogDue(ctl: BlogCtl, now: Date): boolean {
+  const { h, day } = brt(now);
+  if (h < BLOG_FROM || h >= BLOG_TO) return false;
+  const count = ctl.day === day ? ctl.count : 0;
+  if (count >= BLOG_MAX_DAY) return false;
+  const since = (iso: string | null) => (iso ? (now.getTime() - new Date(iso).getTime()) / 60_000 : Infinity);
+  return since(ctl.lastOk) >= BLOG_EVERY_MIN && since(ctl.lastTry) >= BLOG_RETRY_MIN;
+}
+
+/**
+ * Melhor matéria do blog para o Instagram: das publicadas nas últimas 24 h
+ * (com pelo menos 1 h no ar para os números valerem), que ainda não foram ao
+ * Instagram, a de mais visualizações por hora.
+ */
+export function bestForInstagram(list: SiteNews[], postedSiteIds: Set<number>, now: Date): { item: SiteNews; perHour: number } | null {
+  const scored = list
+    .filter((n) => n.date && typeof n.views === 'number' && !postedSiteIds.has(n.id) && !/revis|inativ|agend/i.test(n.status ?? ''))
+    .map((n) => ({ item: n, age: (now.getTime() - new Date(n.date!).getTime()) / 3600_000 }))
+    .filter((x) => x.age >= 1 && x.age <= 24)
+    .map((x) => ({ item: x.item, perHour: x.item.views! / Math.max(1, x.age) }))
+    .sort((a, b) => b.perHour - a.perHour);
+  return scored[0] ?? null;
 }
 
 // ---------------------------------------------------------------- vídeo no próprio celular
@@ -132,18 +169,19 @@ async function renderVideo(input: Parameters<typeof createStoryVideo>[0]): Promi
 
 // ---------------------------------------------------------------- estatística
 
-async function stats(st: LearnState, now: Date) {
+async function stats(st: LearnState, now: Date): Promise<SiteNews[]> {
   const site = withBase(getSiteConfig());
+  let list: SiteNews[] = [];
   const views = new Map<number, number>();
   if (site.user && site.pass) {
     try {
-      const list = await listNews(nativeSiteHttp, site, 3);
+      list = await listNews(nativeSiteHttp, site, 2);
       recordViews(st, now, list);
       for (const n of list) if (typeof n.views === 'number') views.set(n.id, n.views);
       const ga = await siteActiveUsers(nativeSiteHttp, site).catch(() => null);
       if (ga) recordActive(st, now, ga.users);
     } catch (e) {
-      log(st, `Painel indisponível: ${(e as Error).message}`);
+      log(st, `Painel do site indisponível: ${(e as Error).message}`);
     }
   }
   const ig = getIgConfig();
@@ -165,14 +203,13 @@ async function stats(st: LearnState, now: Date) {
     }
   }
   const n = measure(st, now, views, igViews);
-  if (n) log(st, `Desempenho medido em ${n} matéria(s); aprendizado atualizado.`);
+  if (n) log(st, `Aprendizado: desempenho de ${n} matéria(s) medido.`);
+  return list;
 }
 
-// ---------------------------------------------------------------- uma postagem completa
+// ---------------------------------------------------------------- BLOG: uma postagem automática
 
-export async function postOnce(st: LearnState, cfg: AutoConfig, why: string): Promise<boolean> {
-  const now = new Date();
-  log(st, `${why}: procurando a melhor pauta…`);
+export async function blogOnce(st: LearnState, sitePosts: SiteNews[]): Promise<boolean> {
   let trending: string[] = [];
   try {
     const t = await cachedTrends(nativeHttp, 600_000);
@@ -181,113 +218,129 @@ export async function postOnce(st: LearnState, cfg: AutoConfig, why: string): Pr
     /* sem trends */
   }
   const pautas = await capturePautas(nativePautaHttp, { window: '1d', trending, maxAgeHours: MAX_AGE_H });
+  const onSite = [...sitePosts.map((n) => n.title), ...loadQueue().map((q) => q.story.titulo), ...loadQueue().map((q) => q.pautaTitulo)];
   const fresh = pautas
     .filter((p) => p.readable && p.paragraphs >= 3 && p.imagesOk >= 1)
-    .filter((p) => !st.stories.some((u) => u.url === p.url || sameStory(u.title, p.title)))
+    // não repete o que já está no site (do app ou da redação)
+    .filter((p) => !onSite.some((t) => sameStory(t, p.title)) && !loadQueue().some((q) => q.pautaUrl === p.url))
     .map((p) => ({ p, score: p.score + learnedBoost(st, { title: p.title, city: p.city }).pts }))
     .sort((a, b) => b.score - a.score);
   if (!fresh.length) {
-    log(st, 'Nenhuma pauta inédita (até 12 h, com texto e foto) agora.');
+    log(st, 'Blog: nenhuma notícia nova (até 12 h, com foto) que ainda não esteja no site.');
     return false;
   }
   const pick: Pauta = fresh[0]!.p;
-  log(st, `Pauta: ${pick.title} — ${pick.source} (${fresh[0]!.score} pts)`);
+  const r = await postToBlog(pick);
+  log(st, `Blog: publicada "${r.story.titulo}"${r.siteId ? ` (nº ${r.siteId})` : ''}.`);
+  return true;
+}
 
-  const tones = loadTones();
+// ---------------------------------------------------------------- INSTAGRAM: a melhor do blog vira Reels
+
+/** destaque do título e tom/áudio para uma matéria da redação (uma chamada curta à IA) */
+async function highlightAndTone(chat: Chat | null, titulo: string, texto: string): Promise<{ destaque?: string; tom?: string; audio?: string }> {
+  const tones = tonesForAi(loadTones()).filter((t) => t.audios.length);
+  if (!chat) return {};
+  try {
+    const r = await chat(
+      [
+        {
+          role: 'system',
+          content: `Para o post em vídeo desta notícia, responda SÓ com JSON {"destaque": "trecho de 2 a 4 palavras copiado EXATAMENTE do título, o coração da notícia", "tom": "nome exato de um tom", "audio": "nome exato de um áudio desse tom"}. Escolha o tom pelo assunto real (Policial só para crime/prisão/operação/violência; se nada combinar, o mais geral). Tons: ${JSON.stringify(tones)}`,
+        },
+        { role: 'user', content: `TÍTULO: ${titulo}\n\n${texto.slice(0, 3000)}` },
+      ],
+      { json: true, maxTokens: 300 },
+    );
+    const j = JSON.parse(/\{[\s\S]*\}/.exec(r.content)?.[0] ?? '{}') as { destaque?: string; tom?: string; audio?: string };
+    return { destaque: pickHighlight(titulo, j.destaque ?? '', []), tom: j.tom, audio: j.audio };
+  } catch {
+    return {};
+  }
+}
+
+const meta = (html: string, p: string) => new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]*content=["']([^"']*)["']`, 'i').exec(html)?.[1] ?? '';
+
+export async function instagramOnce(st: LearnState, sitePosts: SiteNews[]): Promise<boolean> {
+  const now = new Date();
+  const posted = new Set(st.stories.filter((s) => s.igId && s.siteId).map((s) => s.siteId!));
+  const best = bestForInstagram(sitePosts, posted, now);
+  if (!best) {
+    log(st, 'Instagram: nenhuma matéria do blog com pelo menos 1 h no ar (últimas 24 h) que ainda não foi ao Instagram.');
+    return false;
+  }
+  const n = best.item;
+  log(st, `Instagram: a melhor do blog é "${n.title}" (${n.views} visualizações, ${best.perHour.toFixed(0)}/h).`);
   const chat = aiChat(getAiKey(), nativePost);
-  const story = await writeSiteStory(pick, chat, writerRules(st), tonesForAi(tones));
-  if (!story.model) {
-    log(st, `A IA não escreveu (${story.steps.join(' / ')}). Sem publicar rascunho.`);
-    return false;
+  // dados da matéria: do app (já tem tudo) ou da página pública do site
+  const mine = loadQueue().find((q) => q.siteId === n.id);
+  let titulo = n.title;
+  let subtitulo = '';
+  let categoria = n.categoria ?? 'Notícia';
+  let texto = '';
+  let imagens: { src: string }[] = [];
+  let destaque: string | undefined;
+  let tom: string | undefined;
+  let audio: string | undefined;
+  let palavras: string[] = [];
+  if (mine) {
+    ({ titulo, subtitulo, categoria, destaque, tom, audio } = mine.story);
+    palavras = mine.story.palavrasChave;
+    texto = mine.story.paragrafos.join('\n');
+    imagens = mine.story.imagens;
+  } else {
+    const page = await nativeHttp.getText(n.url);
+    const ex = extractBlocks(page.text, n.url);
+    texto = ex.blocks.filter((b) => b.type === 'p').map((b) => b.text).join('\n');
+    subtitulo = meta(page.text, 'og:description') || meta(page.text, 'description');
+    imagens = [...(ex.ogImage ? [{ src: ex.ogImage }] : []), ...ex.blocks.filter((b) => b.type === 'img' && b.src).map((b) => ({ src: b.src! }))];
+    ({ destaque, tom, audio } = await highlightAndTone(chat, titulo, texto));
   }
-  const tone = resolveTone(tones, story.tom, story.audio, `${story.titulo} ${story.paragrafos.join(' ')}`, story.categoria);
-
-  // foto (a primeira que baixar)
-  let photo: File | null = null;
-  for (const im of story.imagens) {
-    try {
-      photo = await fetchPhoto(im.src, pick.url);
-      break;
-    } catch {
-      /* próxima */
-    }
-  }
+  const photo = await firstPhoto(imagens, n.url);
   if (!photo) {
-    log(st, 'Nenhuma foto da matéria baixou: pauta pulada.');
+    log(st, 'Instagram: a foto da matéria não baixou; fica para o próximo horário.');
     return false;
   }
-
-  // site
-  let siteId: number | null = null;
-  const site = withBase(getSiteConfig());
-  if (site.user && site.pass && cfg.valendo) {
-    try {
-      const r = await addNews(nativeSiteHttp, site, {
-        titulo: story.titulo,
-        subtitulo: story.subtitulo,
-        minititulo: story.minititulo,
-        categoria: story.categoria,
-        palavrasChave: story.palavrasChave,
-        html: story.html,
-        foto: { data: new Uint8Array(await photo.arrayBuffer()), type: photo.type, name: photo.name },
-        publicar: cfg.sitePublicar,
-      }, { prepareCover: canvasCover });
-      siteId = r.id;
-      log(st, `Site: ${r.steps.slice(-1)[0]}`);
-    } catch (e) {
-      log(st, `Site falhou: ${(e as Error).message}`);
-    }
-  } else log(st, `Site: ${cfg.valendo ? 'sem acesso configurado' : 'ensaio'} — "${story.titulo}"`);
-
-  // vídeo no celular
+  const tone = resolveTone(loadTones(), tom, audio, `${titulo} ${texto.slice(0, 2000)}`, categoria);
   const video = await renderVideo({
-    kicker: story.categoria || story.minititulo || 'Notícia',
-    title: story.titulo,
-    subtitle: story.subtitulo,
-    keywords: [story.destaque ?? '', ...story.palavrasChave].filter(Boolean),
+    kicker: categoria,
+    title: titulo,
+    subtitle: subtitulo.slice(0, 180),
+    keywords: [destaque ?? '', ...palavras].filter(Boolean),
     photo,
     audioId: tone?.track.mediaId ?? null,
+    audioStart: tone?.track.inicio,
+    audioDur: tone?.track.dur ?? TRECHO_S,
   });
-  log(st, `Vídeo pronto (${(video.length / 1048576).toFixed(1)} MB)${tone ? `, trilha "${tone.track.name}" (${tone.tone.name})` : ''}${story.destaque ? `, destaque "${story.destaque}"` : ''}.`);
-
-  // legenda no padrão do app
-  const texts = [{ url: pick.url, title: pick.title, source: pick.source, date: pick.date, text: pick.blocks.filter((b) => b.type === 'p').map((b) => b.text).join('\n') }];
+  if (tone) noteTrackUse(tone.track.name);
+  log(st, `Instagram: vídeo pronto${tone ? ` com a trilha "${tone.track.name}"` : ''}${destaque ? `, destaque "${destaque}"` : ''}.`);
+  const texts = [{ url: n.url, title: titulo, source: 'Primeiras Notícias', date: n.date ?? null, text: texto }];
   let caption = '';
   try {
-    caption = styleCaption((await withTrendingHashtags(await writeStory(story.titulo, texts, chat, 'Legenda do Reels com o post em vídeo desta matéria.'), texts, nativeHttp)).text);
+    caption = styleCaption((await withTrendingHashtags(await writeStory(titulo, texts, chat, 'Legenda do Reels com o post em vídeo desta matéria.'), texts, nativeHttp)).text);
   } catch {
     /* reserva abaixo */
   }
-  if (!caption) caption = `${story.titulo}\n\n${story.subtitulo}\n\nMatéria completa em primeirasnoticias.com.br`;
-
-  // Instagram
-  let igId: string | null = null;
+  if (!caption) caption = `${titulo}\n\n${subtitulo}\n\nMatéria completa em primeirasnoticias.com.br`;
   const ig = getIgConfig();
   const token = ig.fbToken || ig.igToken;
-  if (token && ig.userId && cfg.valendo) {
-    try {
-      const r = await publishReel(nativeIgHttp, { userId: ig.userId, token }, video, caption, { coverAtMs: 7500, log: (m) => log(st, m) });
-      igId = r.id;
-    } catch (e) {
-      log(st, `Instagram falhou: ${(e as Error).message}`);
-    }
-  } else log(st, `Instagram: ${cfg.valendo ? 'sem token configurado' : 'ensaio (vídeo ficou nos projetos)'}`);
-
-  if (cfg.valendo && (siteId || igId)) {
-    st.stories.push({ url: pick.url, title: story.titulo, categoria: story.categoria, city: pick.city ?? undefined, keywords: story.palavrasChave, tom: tone?.tone.name, destaque: story.destaque, postedAt: now.toISOString(), siteId, igId });
-    st.stories = st.stories.slice(-400);
-    return true;
+  if (!token || !ig.userId) {
+    log(st, 'Instagram: sem token. Coloque em ⚙ Configurações.');
+    return false;
   }
-  return !cfg.valendo; // ensaio conta como "feito"
+  const r = await publishReel(nativeIgHttp, { userId: ig.userId, token }, video, caption, { coverAtMs: 7500, collaborators: collabUsernames(ig.collab), log: (m) => log(st, `Instagram: ${m}`) });
+  st.stories.push({ url: n.url, title: titulo, categoria, keywords: palavras, tom: tone?.tone.name, destaque, postedAt: now.toISOString(), siteId: n.id, igId: r.id });
+  st.stories = st.stories.slice(-400);
+  log(st, `Instagram: Reels publicado.`);
+  return true;
 }
 
-// ---------------------------------------------------------------- tique (chamado a cada 5 min)
+// ---------------------------------------------------------------- tique (a cada 5 min)
 
 let running = false;
 
-export async function tick(force?: 'postar' | 'estatistica'): Promise<void> {
-  const cfg = getAutoConfig();
-  if (!cfg.ativo && !force) return;
+export async function tick(force?: 'blog' | 'instagram'): Promise<void> {
+  if (!getAutoConfig().ativo && !force) return;
   if (running) return;
   running = true;
   const st = loadState();
@@ -302,29 +355,41 @@ export async function tick(force?: 'postar' | 'estatistica'): Promise<void> {
         for (const l of [...r.log, ...r.warnings]) log(st, `Instagram: ${l}`);
       }
     }
-    // estatística no máximo a cada 25 min
-    const last = st.snap?.at ? new Date(st.snap.at).getTime() : 0;
-    if (force === 'estatistica' || now.getTime() - last > 25 * 60_000) await stats(st, now);
+    const sitePosts = await stats(st, now);
 
-    if (force === 'postar') {
-      await postOnce(st, cfg, 'Postagem manual');
+    // BLOG ao longo do dia
+    const ctl = readJson<BlogCtl>(BLOG_KEY, { lastTry: null, lastOk: null, day: '', count: 0 });
+    if (force === 'blog' || (!force && blogDue(ctl, now))) {
+      const day = brt(now).day;
+      ctl.lastTry = now.toISOString();
+      try {
+        if (await blogOnce(st, sitePosts)) {
+          ctl.lastOk = now.toISOString();
+          ctl.count = (ctl.day === day ? ctl.count : 0) + 1;
+          ctl.day = day;
+        }
+      } catch (e) {
+        log(st, `Blog falhou: ${(e as Error).message}. Tenta de novo em 20 min.`);
+      }
+      writeJson(BLOG_KEY, ctl);
+    }
+
+    // INSTAGRAM nos horários de pico: a melhor do blog
+    if (force === 'instagram') {
+      await instagramOnce(st, sitePosts);
       return;
     }
-    const tries = getTries();
+    if (force) return;
+    const tries = readJson<Record<string, number>>(RUN_KEY, {});
     const slot = openSlot(st, now, tries);
     if (!slot) return;
-    if (postsToday(st, now) >= cfg.maxDia) {
-      st.slotsUsed.push(slot);
-      log(st, `Limite de ${cfg.maxDia} posts hoje.`);
-      return;
-    }
     tries[slot] = (tries[slot] ?? 0) + 1;
-    setTries(tries);
+    writeJson(RUN_KEY, Object.fromEntries(Object.entries(tries).slice(-40)));
     let ok = false;
     try {
-      ok = await postOnce(st, cfg, `Horário ${slot.slice(11)} (tentativa ${tries[slot]}/${MAX_TRIES})`);
+      ok = await instagramOnce(st, sitePosts);
     } catch (e) {
-      log(st, `Falhou: ${(e as Error).message}. Tenta de novo no próximo tique.`);
+      log(st, `Instagram falhou: ${(e as Error).message}. Tenta de novo no próximo tique.`);
     }
     if (ok || tries[slot]! >= MAX_TRIES) st.slotsUsed.push(slot);
   } finally {
@@ -335,10 +400,12 @@ export async function tick(force?: 'postar' | 'estatistica'): Promise<void> {
 
 export function autopostReport() {
   const st = loadState();
-  return { ...report(st), log: st.log.slice(-30).reverse(), ultimaEstatistica: st.snap?.at ?? null };
+  const ctl = readJson<BlogCtl>(BLOG_KEY, { lastTry: null, lastOk: null, day: '', count: 0 });
+  const hoje = brt(new Date()).day;
+  return { ...report(st), log: st.log.slice(-40).reverse(), blogHoje: ctl.day === hoje ? ctl.count : 0, instagramHoje: st.stories.filter((s) => s.igId && brt(new Date(s.postedAt)).day === hoje).length };
 }
 
-/** liga o relógio interno (o serviço nativo também chama tick() a cada 5 min) */
+/** relógio interno (o serviço nativo também chama a cada 5 min) */
 let timer: number | null = null;
 export function startAutopostClock() {
   if (timer) return;

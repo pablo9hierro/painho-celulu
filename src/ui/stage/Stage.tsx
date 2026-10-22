@@ -27,6 +27,7 @@ import {
 import { effectiveCrop, effectiveTransform, patchClip, setCropAt, setTransformAt } from '../../core/edit';
 import { renderFrame } from '../../render/renderer';
 import { preview } from '../../engine/preview';
+import { syncCaptionBox } from '../captions';
 import { getEditor, useEditor } from '../../state/store';
 import { addBlur, deleteSelection, togglePlay } from '../commands';
 import { FRAME_LOGO_DEFAULT, frameLogoRect, type FrameLogoState } from '../../core/frames';
@@ -312,7 +313,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
         x: g.base.x + (m.x - g.m0.x),
         y: g.base.y + (m.y - g.m0.y),
       };
-      s.updateGesture((base) => setTransformAt(base, g.id, s.time, tr, s.autoKey));
+      s.updateGesture((base) => syncCaptionBox(setTransformAt(base, g.id, s.time, tr, s.autoKey), g.id));
       return;
     }
     if (g.kind === 'move') {
@@ -334,7 +335,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       s.updateGesture((base) => {
         let p = base;
         for (const [id, tr] of g.bases) p = setTransformAt(p, id, s.time, { ...tr, x: tr.x + ox, y: tr.y + oy }, s.autoKey);
-        return p;
+        return g.bases.size === 1 ? syncCaptionBox(p, g.primary) : p;
       });
       return;
     }
@@ -344,7 +345,7 @@ function Interaction({ project, scale }: { project: Project; scale: number }) {
       const prefersAspect = !!clip && (MEDIA_TYPES.has(clip.type) || clip.type === 'text');
       const keepAspect = isCorner && (prefersAspect ? !e.shiftKey : e.shiftKey);
       const tr = resizeTransform(g.base, g.handle, pt.x - g.start.x, pt.y - g.start.y, { keepAspect, fromCenter: e.altKey, minSize: 10 });
-      s.updateGesture((base) => setTransformAt(base, g.id, s.time, tr, s.autoKey));
+      s.updateGesture((base) => syncCaptionBox(setTransformAt(base, g.id, s.time, tr, s.autoKey), g.id));
       return;
     }
     if (g.kind === 'rotate') {

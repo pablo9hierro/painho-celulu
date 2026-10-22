@@ -9,6 +9,7 @@ import { useBackHandler } from '../platform/backButton';
 import { findHashtag, findTrends } from '../news/client';
 import type { HashtagLookup, TrendsResult } from '../news/trends';
 import { IconClose } from './icons';
+import { writeClipboard } from '../platform/clipboard';
 
 type Tab = 'searches' | 'news' | 'reels' | 'hashtags';
 const TABS: { id: Tab; label: string }[] = [
@@ -169,7 +170,7 @@ export function TrendsDialog({ onClose, onCreateStory }: { onClose: () => void; 
                   <button className="btn sm" onClick={() => open(r.url)}>
                     Abrir Reels
                   </button>
-                  <button className="btn sm ghost" onClick={() => void navigator.clipboard?.writeText(r.url).catch(() => undefined)}>
+                  <button className="btn sm ghost" onClick={() => void writeClipboard(r.url).catch(() => undefined)}>
                     Copiar link
                   </button>
                 </span>
@@ -210,7 +211,7 @@ export function TrendsDialog({ onClose, onCreateStory }: { onClose: () => void; 
                     </span>
                   </span>
                   <span className="trend-actions">
-                    <button className="btn sm ghost" onClick={() => void navigator.clipboard?.writeText(h.tag).catch(() => undefined)}>
+                    <button className="btn sm ghost" onClick={() => void writeClipboard(h.tag).catch(() => undefined)}>
                       Copiar
                     </button>
                   </span>
@@ -218,7 +219,7 @@ export function TrendsDialog({ onClose, onCreateStory }: { onClose: () => void; 
               ))}
             </ol>
             {data.hashtags.length > 0 && (
-              <button className="btn sm" onClick={() => void navigator.clipboard?.writeText(data.hashtags.slice(0, 10).map((h) => h.tag).join(' ')).catch(() => undefined)}>
+              <button className="btn sm" onClick={() => void writeClipboard(data.hashtags.slice(0, 10).map((h) => h.tag).join(' ')).catch(() => undefined)}>
                 Copiar as 10 primeiras
               </button>
             )}

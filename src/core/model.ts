@@ -155,12 +155,26 @@ export const TextFieldsSchema = z.object({
 });
 export type TextFields = z.infer<typeof TextFieldsSchema>;
 
+/** legenda automática: palavras com o instante em que são ditas (s, relativo ao início do item) */
+export const CaptionSchema = z.object({
+  words: z.array(z.object({ w: z.string(), t: num.min(0) })),
+  /** quem fala (1, 2, ...): cor diferente por pessoa */
+  speaker: num.min(1).max(9),
+  /** limpa = sem fundo · caixa = com fundo · destaque = palavra falada em destaque (karaokê) */
+  look: z.enum(['limpa', 'caixa', 'destaque']),
+  /** máximo de linhas (1, 2 ou 3): o texto diminui para caber */
+  linhas: num.min(1).max(3).optional(),
+});
+export type Caption = z.infer<typeof CaptionSchema>;
+
 export const TextClipSchema = z.object({
   type: z.literal('text'),
   ...VisualBase,
   preset: z.string(),
   fields: TextFieldsSchema,
   style: TextStyleSchema,
+  /** só nas legendas automáticas */
+  caption: CaptionSchema.optional(),
 });
 
 export const BlurClipSchema = z.object({

@@ -205,6 +205,8 @@ export interface SiteNews {
   views?: number;
   date?: string;
   status?: string;
+  /** editoria (coluna CATEGORIA do painel) */
+  categoria?: string;
   editUrl?: string;
   deleteUrl?: string;
 }
@@ -224,6 +226,7 @@ export function parseList(html: string, pageUrl: string): SiteNews[] {
   const cViews = col(/acess|visualiz|views|leitur|clique/);
   const cDate = col(/data|publica/);
   const cStatus = col(/status|situa|ativ/);
+  const cCat = col(/categoria|editoria/);
   const out: SiteNews[] = [];
   for (const row of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
     const r = row[1]!;
@@ -253,6 +256,7 @@ export function parseList(html: string, pageUrl: string): SiteNews[] {
       views: num(cViews),
       date: cDate >= 0 && tds[cDate] ? strip(tds[cDate]!) : publishedAt(strip(tds[1]!)),
       status: cStatus >= 0 && tds[cStatus] ? strip(tds[cStatus]!) : undefined,
+      categoria: cCat >= 0 && tds[cCat] ? strip(tds[cCat]!) : undefined,
       editUrl: edit ? abs(edit.href, pageUrl) : undefined,
       deleteUrl: del ? abs(del.href, pageUrl) : undefined,
     });

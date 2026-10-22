@@ -13,6 +13,7 @@ import { applyFont, drawLines, fitText, lineX, type FontSpec } from './text';
 import { brandImage, drawInstagramGlyph, LOGO_RATIO } from './brandAssets';
 import { incrust } from './incrust';
 import { edicao } from './edicao';
+import { drawCaption } from './captions';
 
 type C = CanvasRenderingContext2D;
 
@@ -884,6 +885,7 @@ function encerramento(ctx: C, c: TextClip, { w, h, t }: HeadlineArgs) {
 const DRAWERS: Record<string, (ctx: C, c: TextClip, a: HeadlineArgs) => void> = {
   'pn-encerramento': encerramento,
   'pn-edicao': edicao,
+  'pn-legenda': (ctx, c, a) => drawCaption(ctx, c, a),
   'pn-marca-dagua': marcaDagua,
   'pn-marca-centro': marcaCentro,
   'pn-faixa': faixa,

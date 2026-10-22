@@ -104,3 +104,28 @@ describe('postador no celular: horário com novas tentativas', () => {
     expect(openSlot(st, at(10), {})).toBeNull(); // já postou
   });
 });
+
+describe('automático: blog e Instagram separados', () => {
+  it('Instagram pega a do blog com mais visualizações por hora (1 h+ no ar, últimas 24 h, sem repetir)', async () => {
+    const { bestForInstagram } = await import('./autopostApp');
+    const now = new Date('2026-10-23T18:00:00-03:00');
+    const n = (id: number, horas: number, views: number, status = 'Publicado') => ({ id, title: `m${id}`, url: '', views, status, date: new Date(now.getTime() - horas * 3600_000).toISOString() });
+    const list = [n(1, 10, 500), n(2, 2, 300), n(3, 0.5, 900), n(4, 30, 9000), n(5, 3, 600, 'Revisão'), n(6, 4, 1000)];
+    // 2: 150/h · 1: 50/h · 6: 250/h · (3 tem menos de 1 h, 4 tem mais de 24 h, 5 está em revisão)
+    expect(bestForInstagram(list, new Set(), now)!.item.id).toBe(6);
+    expect(bestForInstagram(list, new Set([6]), now)!.item.id).toBe(2);
+    expect(bestForInstagram([n(3, 0.5, 900)], new Set(), now)).toBeNull();
+  });
+  it('blog: das 6h às 23h, uma por hora, tenta de novo em 20 min, até 12 no dia', async () => {
+    const { blogDue } = await import('./autopostApp');
+    const at = (hh: number, mm = 0) => new Date(`2026-10-23T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00-03:00`);
+    const vazio = { lastTry: null, lastOk: null, day: '', count: 0 };
+    expect(blogDue(vazio, at(5, 50))).toBe(false); // antes das 6h
+    expect(blogDue(vazio, at(6, 5))).toBe(true);
+    expect(blogDue({ ...vazio, lastOk: at(10).toISOString(), lastTry: at(10).toISOString() }, at(10, 40))).toBe(false); // menos de 1 h
+    expect(blogDue({ ...vazio, lastOk: at(10).toISOString(), lastTry: at(10).toISOString() }, at(11, 5))).toBe(true);
+    expect(blogDue({ ...vazio, lastOk: at(9).toISOString(), lastTry: at(10, 50).toISOString() }, at(11, 0))).toBe(false); // falhou há 10 min
+    expect(blogDue({ lastTry: null, lastOk: null, day: '2026-10-23', count: 12 }, at(15))).toBe(false); // limite do dia
+    expect(blogDue(vazio, at(23, 10))).toBe(false); // depois das 23h
+  });
+});

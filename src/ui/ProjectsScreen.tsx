@@ -4,7 +4,8 @@ import { createProject } from '../core/factory';
 import { uid } from '../core/id';
 import { projects, type ProjectSummary } from '../platform/api';
 import { useEditor } from '../state/store';
-import { IconDots, IconDownload, IconMedia, IconNews, IconPlus, IconSend, IconTrend } from './icons';
+import { IconDots, IconDownload, IconMedia, IconNews, IconPlus, IconSend, IconSettings, IconTrend } from './icons';
+import { SettingsDialog } from './SettingsDialog';
 import { DownloadDialog } from './DownloadDialog';
 import { PostDialog } from './PostDialog';
 import { PostadorDialog } from './PostadorDialog';
@@ -33,6 +34,7 @@ export function ProjectsScreen() {
   const [trends, setTrends] = useState(false);
   const [dl, setDl] = useState(false);
   const [postador, setPostador] = useState(false);
+  const [cfg, setCfg] = useState(false);
   const newRef = useRef<HTMLElement>(null);
 
   const refresh = () =>
@@ -96,38 +98,44 @@ export function ProjectsScreen() {
           <span className="wm-a">Primeiras Notícias</span>
           <span className="wm-b">Studio</span>
         </div>
-        <span className="home-local">Local · seus arquivos não saem deste aparelho</span>
+        <span className="row-gap">
+          <span className="home-local">Local · seus arquivos não saem deste aparelho</span>
+          <button className="icon-btn" onClick={() => setCfg(true)} aria-label="Configurações" title="Configurações (chaves e senhas)" data-testid="open-settings">
+            <IconSettings />
+          </button>
+        </span>
       </header>
 
       <section className="home-hub" aria-label="O que você quer fazer?">
-        <button className="hub-card" onClick={() => newRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid="hub-edit">
-          <IconMedia />
-          <strong>Editar vídeo</strong>
-          <span>Novo projeto ou continue um recente</span>
-        </button>
-        <button className="hub-card" onClick={() => setPost({})} data-testid="hub-news">
-          <IconNews />
-          <strong>Buscar e criar matéria</strong>
-          <span>Pesquise a notícia e gere a legenda do Reels</span>
-        </button>
-        <button className="hub-card" onClick={() => setPostador(true)} data-testid="hub-postador">
-          <IconSend />
-          <strong>Postador de notícias</strong>
-          <span>Pautas do dia, matéria do site e post em vídeo</span>
-        </button>
         <button className="hub-card" onClick={() => setDl(true)} data-testid="hub-download">
           <IconDownload />
           <strong>Baixar vídeo</strong>
           <span>Cole o link do Reels e já edite</span>
+        </button>
+        <button className="hub-card" onClick={() => setPostador(true)} data-testid="hub-postador">
+          <IconSend />
+          <strong>Postador de notícias</strong>
+          <span>Capture as notícias e poste no site; o Instagram sai sozinho</span>
         </button>
         <button className="hub-card" onClick={() => setTrends(true)} data-testid="hub-trends">
           <IconTrend />
           <strong>Trends do momento</strong>
           <span>Em alta, Reels virais e hashtags</span>
         </button>
+        <button className="hub-card" onClick={() => setPost({})} data-testid="hub-news">
+          <IconNews />
+          <strong>Buscar e criar matéria</strong>
+          <span>Pesquise a notícia e gere a legenda do Reels</span>
+        </button>
+        <button className="hub-card" onClick={() => newRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid="hub-edit">
+          <IconMedia />
+          <strong>Editar vídeo</strong>
+          <span>Novo projeto ou continue um recente</span>
+        </button>
       </section>
       {dl && <DownloadDialog onClose={() => setDl(false)} />}
       {postador && <PostadorDialog onClose={() => setPostador(false)} />}
+      {cfg && <SettingsDialog onClose={() => setCfg(false)} />}
       {post && <PostDialog initialQuery={post.query} onClose={() => setPost(null)} />}
       {trends && (
         <TrendsDialog

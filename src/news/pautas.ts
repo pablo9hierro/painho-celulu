@@ -14,7 +14,7 @@
 import { decodeEntities, normTitle, searchRecent, type Article, type Http } from './search';
 import { parseGoogleNewsSection } from './trends';
 
-export const CITIES = ['João Pessoa', 'Bayeux', 'Campina Grande'] as const;
+export const CITIES = ['João Pessoa', 'Bayeux', 'Campina Grande', 'Guarabira', 'Monteiro', 'Pilõezinhos'] as const;
 
 /** cidades que NUNCA entram (pedido da redação): notícia que cita qualquer uma fica de fora */
 export const BLOCKED_CITIES = ['Cabedelo', 'Santa Rita'] as const;

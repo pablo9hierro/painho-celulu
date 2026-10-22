@@ -16,6 +16,7 @@ import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress 
 import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
 import { isBundledBrand, isSupersededBrand } from '../../platform/bundledBrand';
+import { CAPTION_PRESET, generateCaptions, restyleCaptions, type CaptionLook, type CaptionStyle } from '../captions';
 
 /** arrastar para a timeline só com mouse; no toque, arrastar disparava inserção dupla */
 const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
@@ -269,6 +270,7 @@ function TextPanel() {
   return (
     <>
       <p className="hint">Escolha a moldura e a manchete — as duas se encaixam. Cada escolha vira um item na timeline, inserido na agulha (pode colocar várias molduras).</p>
+      <AutoCaptions />
       <section className="preset-section">
         <h4>Molduras</h4>
         <div className="frame-grid">
@@ -315,6 +317,79 @@ function TextPanel() {
         </section>
       ))}
     </>
+  );
+}
+
+const LOOKS: { id: CaptionLook; label: string; hint: string }[] = [
+  { id: 'limpa', label: 'Sem fundo', hint: 'letra branca com contorno fino' },
+  { id: 'caixa', label: 'Com fundo', hint: 'faixa azul-escura atrás' },
+  { id: 'destaque', label: 'Palavra em destaque', hint: 'a palavra falada acende em azul' },
+];
+
+/** Legendas automáticas: a IA ouve a fala, separa quem fala e cria as legendas. */
+function AutoCaptions() {
+  const notify = useEditor((s) => s.notify);
+  const count = useEditor((s) => s.project?.clips.filter((c) => c.type === 'text' && c.preset === CAPTION_PRESET).length ?? 0);
+  const [st, setSt] = useState<CaptionStyle>({ look: 'destaque', upper: false, linhas: 2, align: 'center' });
+  const { look, upper } = st;
+  const [step, setStep] = useState<string | null>(null);
+  const run = async () => {
+    setStep('Começando…');
+    try {
+      const r = await generateCaptions({ ...st, onStep: setStep });
+      notify(`${r.count} legendas criadas${r.falantes > 1 ? `, ${r.falantes} pessoas falando (cada uma com uma cor)` : ''}.`, 'info');
+    } catch (e) {
+      notify((e as Error).message, 'error');
+    } finally {
+      setStep(null);
+    }
+  };
+  const set = (patch: Partial<CaptionStyle>) => {
+    setSt((cur) => ({ ...cur, ...patch }));
+    if (count) restyleCaptions(patch);
+  };
+  const pick = (l: CaptionLook) => set({ look: l });
+  return (
+    <section className="preset-section" data-testid="auto-captions">
+      <h4>Legendas automáticas</h4>
+      <p className="hint">A IA ouve a fala do vídeo e escreve as legendas no tempo certo. Se falar mais de uma pessoa, cada uma ganha uma cor.</p>
+      <div className="row-gap">
+        {LOOKS.map((l) => (
+          <button key={l.id} className={`btn ${look === l.id ? 'primary' : ''}`} title={l.hint} onClick={() => pick(l.id)} data-testid={`caption-look-${l.id}`}>
+            {l.label}
+          </button>
+        ))}
+      </div>
+      <label className="check small">
+        <input type="checkbox" checked={upper} onChange={(e) => set({ upper: e.target.checked })} data-testid="caption-upper" /> Tudo em maiúsculas
+      </label>
+      <div className="row-gap">
+        <span className="small muted">Linhas:</span>
+        {[1, 2, 3].map((n) => (
+          <button key={n} className={`btn sm ${st.linhas === n ? 'primary' : ''}`} onClick={() => set({ linhas: n })} data-testid={`caption-lines-${n}`}>
+            {n}
+          </button>
+        ))}
+      </div>
+      <div className="row-gap">
+        <span className="small muted">Posição:</span>
+        {(
+          [
+            ['left', 'Esquerda'],
+            ['center', 'Centro'],
+            ['right', 'Direita'],
+          ] as const
+        ).map(([a, label]) => (
+          <button key={a} className={`btn sm ${st.align === a ? 'primary' : ''}`} onClick={() => set({ align: a })} data-testid={`caption-align-${a}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <button className="btn primary wide" disabled={!!step} onClick={() => void run()} data-testid="caption-generate">
+        {step ?? (count ? 'Gerar de novo (substitui as atuais)' : 'Gerar legendas da fala')}
+      </button>
+      {count > 0 && <p className="hint small" data-testid="caption-count">{count} legendas na trilha "Legendas". Toque numa para corrigir o texto; arraste ou estique a caixa no vídeo e todas acompanham.</p>}
+    </section>
   );
 }
 

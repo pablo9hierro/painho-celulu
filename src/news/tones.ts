@@ -12,7 +12,14 @@ export interface ToneTrack {
   mediaId: string;
   /** nome dado pelo jornalista (a IA usa para escolher) */
   name: string;
+  /** trecho escolhido da música (deslizando na faixa, como no Instagram): início em segundos */
+  inicio?: number;
+  /** duração do trecho (15 ou 20 s) = duração do post em vídeo */
+  dur?: number;
 }
+
+/** duração padrão do trecho da música (e do post em vídeo) */
+export const TRECHO_S = 15;
 
 export interface Tone {
   id: string;
@@ -42,8 +49,34 @@ export function saveTones(t: Tone[]) {
 }
 
 /** resumo que vai para a IA (só nomes; nada de arquivo) */
-export function tonesForAi(t: Tone[]): { tom: string; dica: string; audios: string[] }[] {
-  return t.filter((x) => x.name.trim()).map((x) => ({ tom: x.name.trim(), dica: x.hint.trim(), audios: x.tracks.map((k) => k.name.trim()).filter(Boolean) }));
+export function tonesForAi(t: Tone[], recent: string[] = recentTracks()): { tom: string; dica: string; audios: string[] }[] {
+  const used = new Set(recent.map(fold));
+  return t
+    .filter((x) => x.name.trim())
+    .map((x) => {
+      const all = x.tracks.map((k) => k.name.trim()).filter(Boolean);
+      // não repetir as últimas trilhas usadas (se o tom tiver outras)
+      const fresh = all.filter((n) => !used.has(fold(n)));
+      return { tom: x.name.trim(), dica: x.hint.trim(), audios: fresh.length ? fresh : all };
+    });
+}
+
+const RECENT = 'pn-trilhas-recentes';
+/** últimas trilhas usadas (para variar a música de um post para o outro) */
+export function recentTracks(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT) ?? '[]') as string[];
+    return Array.isArray(v) ? v.slice(0, 4) : [];
+  } catch {
+    return [];
+  }
+}
+export function noteTrackUse(name: string) {
+  try {
+    localStorage.setItem(RECENT, JSON.stringify([name, ...recentTracks().filter((x) => x !== name)].slice(0, 4)));
+  } catch {
+    /* sem armazenamento */
+  }
 }
 
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -79,7 +112,9 @@ export function guessTone(tones: Tone[], text: string, categoria = ''): { tone: 
     return s;
   };
   const tone = [...usable].sort((a, b) => score(b) - score(a))[0]!;
-  const track = [...tone.tracks].sort((a, b) => [...words(b.name)].filter((x) => w.has(x)).length - [...words(a.name)].filter((x) => w.has(x)).length)[0]!;
+  const used = new Set(recentTracks().map(fold));
+  const fit = (k: ToneTrack) => [...words(k.name)].filter((x) => w.has(x)).length - (used.has(fold(k.name.trim())) ? 5 : 0);
+  const track = [...tone.tracks].sort((a, b) => fit(b) - fit(a))[0]!;
   return { tone, track };
 }
 

@@ -13,6 +13,7 @@ import type { Article } from '../news/search';
 import { IG_LIMIT } from '../news/writer';
 import { plainCaption, styleCaption } from '../news/unicodeStyle';
 import { IconClip, IconClose } from './icons';
+import { writeClipboard } from '../platform/clipboard';
 
 interface Saved {
   query: string;
@@ -41,7 +42,7 @@ function ago(iso: string): string {
 
 async function copy(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeClipboard(text);
     return true;
   } catch {
     // reserva para WebViews sem a API de área de transferência

@@ -93,7 +93,7 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
   await page.getByTestId('postador-capture').click();
   await expect(page.getByTestId('postador-pauta')).toHaveCount(2);
   await expect(page.getByTestId('postador-pauta').first()).toContainText('96 pts');
-  await page.getByTestId('postador-pauta').first().click();
+  await page.getByTestId('postador-pauta').first().locator('.post-card-body').click();
   await expect(page.getByTestId('postador-open')).toContainText('dá para baixar');
   await page.getByTestId('postador-write').click();
   const story = page.getByTestId('postador-story');
@@ -114,7 +114,8 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
   expect(cs.some((c) => c.type === 'frame' && c.frame === 'central')).toBe(true);
   expect(cs.some((c) => c.type === 'image')).toBe(true);
   expect(cs.find((c) => c.type === 'audio')?.name).toContain('tensao-grave');
-  expect(text.duration).toBe(8);
+  // o post tem o tamanho do trecho da música (15 s por padrão)
+  expect(text.duration).toBe(15);
 });
 
 test('Postador: aba do site guarda o acesso e explica quando falta senha', async ({ page }) => {
@@ -126,19 +127,112 @@ test('Postador: aba do site guarda o acesso e explica quando falta senha', async
   await expect(page.getByText(/Acesso OK|usuário e a senha|recusado|painel/).first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('postador-tab-auto')).toBeVisible();
   await page.getByTestId('postador-tab-auto').click();
-  await expect(page.getByTestId('auto-box')).toContainText('Postador automático (neste celular)');
-  await expect(page.getByText('No PC é só para ver como fica')).toBeVisible();
+  await expect(page.getByTestId('auto-box')).toContainText('das 6h às 23h');
+  await expect(page.getByText(/No PC é só para ver como fica/)).toBeVisible();
 });
 
-test('Automação: liga, ensaia e mostra horários e o que fez (painel do celular)', async ({ page }) => {
+test('Automação simples: um botão liga/desliga; blog ao longo do dia e Instagram com a melhor', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('hub-postador').click();
   await page.getByTestId('postador-tab-auto').click();
-  const box = page.getByTestId('auto-box');
-  await expect(box).toBeVisible();
-  await page.getByTestId('auto-on').check();
+  const sw = page.getByTestId('auto-switch');
+  await expect(sw).toContainText('DESLIGADO');
+  await sw.click();
+  await expect(sw).toContainText('LIGADO');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(true);
-  await expect(page.locator('p', { hasText: 'Próximos horários' })).toContainText(/\d\d:\d\d/);
-  await page.getByTestId('auto-on').uncheck();
+  await expect(page.getByTestId('auto-box')).toContainText('das 6h às 23h');
+  await expect(page.getByText(/mais visualizações/)).toBeVisible();
+  await expect(page.locator('b').filter({ hasText: /\d\d:\d\d/ }).first()).toBeVisible();
+  await sw.click();
+  await expect(sw).toContainText('DESLIGADO');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(false);
+});
+
+test('Postar no site direto da lista: escreve e publica no blog', async ({ page }) => {
+  const { photo } = fixtures();
+  await page.route('**/api/fx', (r) => r.fulfill({ json: { rate: 5, at: '2026-10-22', approx: false } }));
+  await page.route('**/api/news/config', (r) => r.fulfill({ json: { ai: true } }));
+  await page.route('**/api/pautas?*', (r) => r.fulfill({ json: { pautas: [PAUTA], plan: null } }));
+  await page.route('**/api/site/write', (r) =>
+    r.fulfill({ json: { titulo: 'Polícia prende dois suspeitos de assalto em Bayeux', subtitulo: 'Dupla foi levada à Central', minititulo: 'POLÍCIA', categoria: 'Policial', palavrasChave: ['Bayeux'], paragrafos: ['A PM prendeu dois suspeitos.'], imagens: [{ src: 'https://portal.test/foto1.jpg', caption: '' }], html: '<p>A PM prendeu dois suspeitos.</p>', unverified: [], style: [], model: 'google/gemini-2.5-flash-lite', steps: [], costUsd: 0.0004, tom: 'Policial', audio: 'policial - suspense sombrio, crime', destaque: 'prende dois suspeitos' } }),
+  );
+  let publicado: { post: { titulo: string; publicar: boolean }; foto: unknown } | null = null;
+  await page.route('**/api/site/publish', (r) => {
+    publicado = r.request().postDataJSON();
+    return r.fulfill({ json: { id: 46100, steps: ['Conferido na lista: notícia nº 46100'] } });
+  });
+  await page.route('**/api/pautas/image?*', (r) => r.fulfill({ body: readFileSync(photo), contentType: 'image/jpeg' }));
+  await page.goto('/');
+  await page.evaluate(() => localStorage.removeItem('pn-fila-instagram'));
+  await page.getByTestId('hub-postador').click();
+  await page.getByTestId('postador-capture').click();
+  await expect(page.getByTestId('postador-pauta')).toHaveCount(1);
+  await page.getByTestId('postador-post').click();
+  await expect(page.getByTestId('postador-post-status')).toContainText('No site (nº 46100)', { timeout: 30_000 });
+  expect(publicado!.post.titulo).toBe('Polícia prende dois suspeitos de assalto em Bayeux');
+  expect(publicado!.foto).toBeTruthy();
+  // publicou de verdade (não fica em revisão)
+  expect((publicado as unknown as { post: { publicar: boolean } }).post.publicar).toBe(true);
+});
+
+test('Tons que vêm no app: 17 trilhas com o melhor trecho marcado; desliza para escolher outro (como no Instagram)', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/');
+  await page.evaluate(() => {
+    localStorage.removeItem('pn-tons-padrao-v1');
+    localStorage.removeItem('pn-tons-padrao-v2');
+    localStorage.removeItem('pn-tones-v1');
+  });
+  await page.getByTestId('hub-postador').click();
+  await page.getByTestId('postador-tab-tons').click();
+  await expect(page.getByTestId('tone-card')).toHaveCount(3, { timeout: 120_000 });
+  await expect(page.locator('input[aria-label="Nome do áudio"]')).toHaveCount(17, { timeout: 120_000 });
+  const tones = await page.evaluate(() => JSON.parse(localStorage.getItem('pn-tones-v1') ?? '[]').map((t: { name: string; tracks: unknown[] }) => `${t.name}:${t.tracks.length}`));
+  expect(tones.sort()).toEqual(['Geral:4', 'Policial:8', 'Urgente:5']);
+  type T = { name: string; tracks: { name: string; mediaId: string; inicio?: number; dur?: number }[] };
+  const read = () => page.evaluate(() => JSON.parse(localStorage.getItem('pn-tones-v1') ?? '[]') as T[]);
+  let all = (await read()).flatMap((t) => t.tracks);
+  // 10 músicas inteiras; cada trilha aponta para o melhor trecho de 15 s
+  expect(new Set(all.map((k) => k.mediaId)).size).toBe(10);
+  expect(all.every((k) => k.dur === 15 && typeof k.inicio === 'number')).toBe(true);
+  const dark = all.find((k) => k.name === 'policial - thriller escuro, perseguição')!;
+  expect(dark.inicio).toBe(86.5);
+  // abre o trecho da 1ª trilha do card "Policial" e desliza com o dedo
+  const card = page.getByTestId('tone-card').filter({ has: page.locator('input[value="Policial"]') });
+  await card.getByTestId('tone-trim').first().click();
+  const range = card.getByTestId('music-trim-range');
+  await expect(range).toContainText(' de ', { timeout: 60_000 });
+  const before = await range.textContent();
+  const wave = card.getByTestId('music-trim-wave');
+  await wave.scrollIntoViewIfNeeded();
+  const box = (await wave.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.45, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(range).not.toHaveText(before!);
+  await card.getByTestId('music-trim-20').click();
+  const first = (await read()).find((t) => t.name === 'Policial')!.tracks[0]!;
+  expect(first.dur).toBe(20);
+  expect(first.inicio!).toBeGreaterThan(10);
+  await expect(card.getByTestId('tone-trim').first()).toContainText('20s');
+});
+
+test('Configurações: um lugar só, salva e continua lá; ordem dos botões da tela inicial', async ({ page }) => {
+  await page.goto('/');
+  const hub = await page.locator('.home-hub .hub-card').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+  expect(hub).toEqual(['hub-download', 'hub-postador', 'hub-trends', 'hub-news', 'hub-edit']);
+  await page.getByTestId('open-settings').click();
+  await page.getByTestId('cfg-ai').fill('sk-or-teste');
+  await page.getByTestId('cfg-site-user').fill('usuario-teste');
+  await page.getByTestId('cfg-ig-id').fill('17841476565061887');
+  await page.getByTestId('cfg-save').click();
+  await page.reload();
+  await page.getByTestId('open-settings').click();
+  await expect(page.getByTestId('cfg-ai')).toHaveValue('sk-or-teste');
+  await expect(page.getByTestId('cfg-site-user')).toHaveValue('usuario-teste');
+  await expect(page.getByTestId('cfg-ig-id')).toHaveValue('17841476565061887');
+  // collab automática com @portalnewsjampa já vem preenchida
+  await expect(page.getByTestId('cfg-ig-collab')).toHaveValue('portalnewsjampa');
+  await page.evaluate(() => ['pn-ai-key', 'pn-websg', 'pn-instagram'].forEach((k) => localStorage.removeItem(k)));
 });

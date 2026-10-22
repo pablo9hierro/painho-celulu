@@ -18,7 +18,7 @@ import { markKeyword } from '../render/edicao';
 import { waitReady } from './importer';
 
 export const STORY_FRAME = 'central';
-export const STORY_SECONDS = 8;
+export const STORY_SECONDS = 15;
 
 export interface StoryVideoInput {
   kicker: string;
@@ -33,6 +33,9 @@ export interface StoryVideoInput {
   duration?: number;
   /** trilha do tom escolhido (id na biblioteca de mídia) */
   audioId?: string | null;
+  /** trecho escolhido da música: início (s) e duração (s); a duração do post segue o trecho */
+  audioStart?: number;
+  audioDur?: number;
 }
 
 /** Monta o projeto (sem enviar nada): usado pelo app e pela automação. */
@@ -42,7 +45,7 @@ export function buildStoryProject(
   audio: MediaAsset | null,
 ): Project {
   const format = input.format ?? 'reel';
-  const duration = Math.max(5, Math.min(20, input.duration ?? STORY_SECONDS));
+  const duration = Math.max(5, Math.min(20, input.duration ?? (audio ? input.audioDur : undefined) ?? STORY_SECONDS));
   const title = markKeyword(input.title.trim(), input.keywords ?? []);
   const name = title.replace(/\*/g, '').slice(0, 60) || `Post ${new Date().toLocaleDateString('pt-BR')}`;
   let p = createProject(name, format);
@@ -91,7 +94,10 @@ export function buildStoryProject(
   // trilha do tom: cortada no tamanho do post, entrando e saindo suave
   if (audio && audio.status === 'ready') {
     const clip = createAudioClip(p, audio, 0);
-    clip.duration = Math.min(duration, Math.max(0.1, audio.duration || duration));
+    // o trecho que o jornalista escolheu (ou o melhor que veio marcado), nunca passando do fim da música
+    const total = audio.duration || duration;
+    clip.sourceIn = Math.max(0, Math.min(input.audioStart ?? 0, total - Math.min(total, duration)));
+    clip.duration = Math.min(duration, Math.max(0.1, total - clip.sourceIn));
     clip.fadeIn = 0.3;
     clip.fadeOut = Math.min(1.2, clip.duration / 3);
     clip.volume = 0.85;

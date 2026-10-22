@@ -62,7 +62,7 @@ function toneRule(tones: ToneOption[]): string {
   if (!ok.length) return '';
   return `
 
-TOM DO VÍDEO: escolha o tom pelo ASSUNTO real da notícia, comparando com o nome e a "dica" de cada tom (ex.: tom Policial só para crime, prisão, operação policial, violência; política, economia ou cultura NÃO são policiais). Se nenhum tom combinar claramente, escolha o mais geral/neutro da lista. Dentro do tom, escolha o áudio cujo nome combina melhor com o clima (ex.: "urgente" para fato grave e recente). Opções (JSON): ${JSON.stringify(ok)}. Acrescente ao JSON: "tom": "nome exato do tom", "audio": "nome exato do áudio".`;
+TOM DO VÍDEO: escolha o tom pelo ASSUNTO real da notícia, comparando com o nome e a "dica" de cada tom (ex.: tom Policial só para crime, prisão, operação policial, violência; política, economia ou cultura NÃO são policiais). Se nenhum tom combinar claramente, escolha o mais geral/neutro da lista. Dentro do tom, CAPRICHE na música: leia o clima da notícia e escolha o áudio cujo nome combina melhor (ex.: "impacto"/"batida pesada" para tragédia e fato chocante; "suspense"/"sombrio" para crime ainda sem solução; "perseguição"/"batida forte" para operação e prisão; "clímax" para desfecho; "abertura"/"telejornal" para anúncio e serviço; "leve"/"animado" para cultura, festa e boa notícia). A lista já vem sem as últimas músicas usadas, para variar. Opções (JSON): ${JSON.stringify(ok)}. Acrescente ao JSON: "tom": "nome exato do tom", "audio": "nome exato do áudio".`;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

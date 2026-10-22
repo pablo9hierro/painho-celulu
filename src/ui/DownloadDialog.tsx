@@ -12,6 +12,7 @@ import { downloadFromLink, type LinkDownloadError } from '../news/downloadClient
 import { waitReady } from './importer';
 import { useEditor } from '../state/store';
 import { IconClose } from './icons';
+import { readClipboard } from '../platform/clipboard';
 
 /** Envia o vídeo para a biblioteca e abre um projeto Reels com ele na timeline. */
 async function editVideo(file: File): Promise<void> {
@@ -63,10 +64,11 @@ export function DownloadDialog({ onClose }: { onClose: () => void }) {
 
   const paste = async () => {
     try {
-      const t = await navigator.clipboard.readText();
-      if (t) setLink(t.trim());
+      const t = await readClipboard();
+      if (t) setLink(t);
+      else notify('Nada copiado: copie o link do Reels no Instagram e toque em Colar.', 'error');
     } catch {
-      /* sem permissão: o usuário cola manualmente */
+      notify('Não consegui ler o que foi copiado. Toque e segure no campo e escolha "Colar".', 'error');
     }
   };
 

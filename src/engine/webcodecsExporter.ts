@@ -155,7 +155,7 @@ const WINDOW_S = 20;
  * A memória fica pequena mesmo em vídeos longos, e a mudança de velocidade
  * preserva o tom da voz (igual ao player): só o "Disfarçar voz" muda o tom.
  */
-async function mixAudioWindows(
+export async function mixAudioWindows(
   project: Project,
   media: Record<string, MediaAsset>,
   duration: number,
