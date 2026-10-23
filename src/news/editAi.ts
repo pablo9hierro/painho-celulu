@@ -43,7 +43,7 @@ const ActionSchema = z.discriminatedUnion('tipo', [
     tipo: z.literal('desfoque'),
     inicio: z.number().min(0),
     duracao: z.number().min(0.3).max(30),
-    area: z.enum(['centro', 'topo', 'base', 'esquerda', 'direita', 'tudo']),
+    area: z.enum(['centro', 'topo', 'base', 'esquerda', 'direita', 'topo-esquerda', 'topo-direita', 'base-esquerda', 'base-direita', 'tudo']),
   }),
   z.object({ tipo: z.literal('excluir'), clipId: z.string() }),
 ]);
@@ -51,12 +51,15 @@ export type EditAction = z.infer<typeof ActionSchema>;
 
 export interface EditContext {
   duration: number;
+  /** onde está a agulha (o "aqui"/"nesse momento" do comando) */
+  agulha: number;
   clips: { id: string; tipo: string; nome: string; inicio: number; duracao: number }[];
   /** frase, tempo e quem fala (se já houver legendas geradas) */
   falas: { inicio: number; fim: number; falante: number; texto: string }[];
 }
 
-export function buildContext(p: Project): EditContext {
+/** `agulha`: posição atual do play head (em segundos) — é o que "aqui"/"nesse momento" do comando quer dizer. */
+export function buildContext(p: Project, agulha = 0): EditContext {
   const clips = p.clips
     .filter((c) => c.type !== 'frame')
     .map((c) => ({ id: c.id, tipo: c.type, nome: c.name, inicio: Math.round(c.start * 10) / 10, duracao: Math.round(c.duration * 10) / 10 }))
@@ -65,7 +68,7 @@ export function buildContext(p: Project): EditContext {
     .filter((c): c is Extract<Clip, { type: 'text' }> => c.type === 'text' && c.preset === 'pn-legenda')
     .map((c) => ({ inicio: Math.round(c.start * 10) / 10, fim: Math.round((c.start + c.duration) * 10) / 10, falante: c.caption?.speaker ?? 1, texto: c.fields.title }))
     .sort((a, b) => a.inicio - b.inicio);
-  return { duration: Math.round(projectDuration(p) * 10) / 10, clips, falas };
+  return { duration: Math.round(projectDuration(p) * 10) / 10, agulha: Math.round(agulha * 10) / 10, clips, falas };
 }
 
 const PRESET_LIST = HEADLINE_PRESETS.filter((p) => !p.hidden && p.category !== 'encerramento').map((p) => `${p.id} (${p.name}: ${p.description})`);
@@ -78,11 +81,14 @@ function prompt(ctx: EditContext): string {
     '- {"tipo":"velocidade","clipId":"...","fator":N}: muda a velocidade de um item (0.25 a 4; 1 = normal, 2 = dobro, 0.5 = câmera lenta).',
     `- {"tipo":"manchete","preset":"um id da lista abaixo","texto":"...","inicio":N,"duracao":N}: cria uma manchete/elemento de texto.`,
     '- {"tipo":"zoom","clipId":"...","inicio":N,"duracao":N,"direcao":"aproximar"|"afastar","foco":"centro"|"esquerda"|"direita"|"topo"|"base"}: dá um zoom (Pan/Crop) num vídeo ou imagem.',
-    '- {"tipo":"desfoque","inicio":N,"duracao":N,"area":"centro"|"topo"|"base"|"esquerda"|"direita"|"tudo"}: borra uma parte do quadro (ex.: cobrir um rosto ou uma logo).',
+    '- {"tipo":"desfoque","inicio":N,"duracao":N,"area":"centro"|"topo"|"base"|"esquerda"|"direita"|"topo-esquerda"|"topo-direita"|"base-esquerda"|"base-direita"|"tudo"}: borra uma parte do quadro (ex.: cobrir um rosto, uma logo ou uma manchete de outro canal). Use os cantos para marca d\'água/logo de outro canal, que costuma ficar num dos 4 cantos.',
     '- {"tipo":"excluir","clipId":"..."}: remove um item inteiro (ex.: uma manchete ou desfoque que não serve mais).',
     `Manchetes disponíveis: ${PRESET_LIST.join(' | ')}`,
     `O vídeo dura ${ctx.duration}s. Itens na timeline (id, tipo, nome, início, duração): ${JSON.stringify(ctx.clips)}`,
+    `A agulha (onde o jornalista está olhando agora) está em ${ctx.agulha}s. Quando o comando disser "aqui", "nesse momento", "onde está a agulha" ou não disser quando, use ${ctx.agulha}s como início.`,
     ctx.falas.length ? `O que é falado, com o tempo exato (use para entender "quando ele fala X"): ${JSON.stringify(ctx.falas)}` : 'Ainda não há transcrição da fala neste projeto: para comandos que dependam do que é falado, avise no "aviso".',
+    'IMPORTANTE: você não vê a imagem do vídeo (não sabe se tem logo de outro canal, nem onde exatamente ela está na tela). Para cobrir algo visual (logo, manchete de outro canal, rosto), use EXATAMENTE o tempo e o canto/área que o jornalista disse. Se ele não disser onde ou quando, pergunte no "aviso" em vez de chutar.',
+    'Quando o jornalista DITAR o texto da manchete (ex.: "bota a manchete escrito urgente, suspeito foi preso"), use EXATAMENTE essas palavras no "texto" — não resuma nem reescreva. Só escreva um texto por conta própria se ele pedir isso explicitamente (ex.: "escreve uma manchete curta sobre isso").',
     'Nunca invente um clipId que não está na lista. Se o pedido não fizer sentido com o que existe, devolva "acoes":[] e explique em "aviso".',
     'Responda: {"acoes":[...], "aviso": "opcional, uma frase curta se algo não pôde ser feito"}',
   ].join('\n');
@@ -179,6 +185,11 @@ const AREA: Record<string, { x: number; y: number; width: number; height: number
   base: { x: 0.5, y: 0.84, width: 1, height: 0.3 },
   esquerda: { x: 0.2, y: 0.5, width: 0.4, height: 1 },
   direita: { x: 0.8, y: 0.5, width: 0.4, height: 1 },
+  // cantos: onde costuma ficar a marca d'água/logo de outro canal num vídeo baixado
+  'topo-esquerda': { x: 0.18, y: 0.1, width: 0.34, height: 0.16 },
+  'topo-direita': { x: 0.82, y: 0.1, width: 0.34, height: 0.16 },
+  'base-esquerda': { x: 0.18, y: 0.9, width: 0.34, height: 0.16 },
+  'base-direita': { x: 0.82, y: 0.9, width: 0.34, height: 0.16 },
   tudo: { x: 0.5, y: 0.5, width: 1, height: 1 },
 };
 

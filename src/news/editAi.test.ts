@@ -68,3 +68,22 @@ describe('edição por IA: aplica de verdade na timeline', () => {
     expect(p2).toEqual(p);
   });
 });
+
+describe('contexto para a IA: agulha e cantos', () => {
+  it('leva a posição da agulha no contexto', () => {
+    const p = createProject('t', 'reel');
+    expect(buildContext(p, 6.37).agulha).toBeCloseTo(6.4, 1);
+    expect(buildContext(p).agulha).toBe(0);
+  });
+
+  it('desfoque de canto cobre o quadrante certo (onde costuma ficar a logo de outro canal)', () => {
+    let p = createProject('t', 'reel');
+    const v = createVideoClip(p, video(10), 0);
+    v.duration = 10;
+    p = placeClip(p, v);
+    const p2 = applyEditActions(p, [{ tipo: 'desfoque', inicio: 0, duracao: 3, area: 'topo-direita' }]);
+    const blur = p2.clips.find((c) => c.type === 'blur')!;
+    expect(blur.transform.x).toBeGreaterThan(p.width / 2); // lado direito
+    expect(blur.transform.y).toBeLessThan(p.height / 2); // lado de cima
+  });
+});

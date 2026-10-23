@@ -61,7 +61,7 @@ export async function runQueue(): Promise<void> {
       const s = getEditor();
       const project = s.project;
       if (!project) throw new Error('Nenhum projeto aberto.');
-      const ctx = buildContext(project);
+      const ctx = buildContext(project, s.time);
       const r = await planEdit(chat, ctx, cmd.texto);
       if (!r.actions.length) {
         setCmd(cmd.id, { status: 'vazio', aviso: r.aviso || 'Nada para aplicar (comando não reconhecido ou já feito).' });
