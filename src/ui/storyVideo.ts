@@ -98,8 +98,10 @@ export function buildStoryProject(
   const top = (def.window.y + def.window.h) * p.height + p.height * 0.008;
   // termina antes da área do nome/legenda do Instagram (e dentro da miniatura 3:4)
   const bottom = p.height * 0.75;
-  // à direita ficam os botões do Instagram (curtir, comentar...): o texto não vai até lá
-  text.transform = { ...text.transform, x: p.width * 0.445, y: (top + bottom) / 2, width: p.width * 0.89, height: bottom - top };
+  // caixa centralizada de verdade (a margem é igual dos dois lados); o texto em
+  // si começa rente à esquerda da caixa (estilo da placa), não precisa empurrar
+  // a caixa pra esquerda — isso é o que deixava torto
+  text.transform = { ...text.transform, x: p.width * 0.5, y: (top + bottom) / 2, width: p.width * 0.86, height: bottom - top };
   p = placeClip(p, text);
   // trilha do tom: cortada no tamanho do post, entrando e saindo suave
   if (audio && audio.status === 'ready') {

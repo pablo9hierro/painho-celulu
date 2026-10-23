@@ -9,7 +9,7 @@ const mem = new Map<string, string>();
 };
 (globalThis as { window?: unknown }).window = globalThis;
 (globalThis as { CustomEvent?: unknown }).CustomEvent = class { type: string; detail: unknown; constructor(t: string, o: { detail: unknown }) { this.type = t; this.detail = o.detail; } };
-if (!(globalThis as { addEventListener?: unknown }).addEventListener) (globalThis as { addEventListener: () => void }).addEventListener = () => undefined;
+if (!(globalThis as { addEventListener?: unknown }).addEventListener) (globalThis as unknown as { addEventListener: () => void }).addEventListener = () => undefined;
 (globalThis as { dispatchEvent?: unknown }).dispatchEvent = () => undefined;
 
 describe('relatório de gasto com IA: acumulado, por função e por dia/semana', () => {
