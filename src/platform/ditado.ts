@@ -9,7 +9,7 @@ interface DitadoPlugin {
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): Promise<{ ouvindo: boolean; disponivel: boolean }>;
-  addListener(event: 'ditado-comando' | 'ditado-parcial' | 'ditado-status' | 'ditado-erro', cb: (d: Record<string, unknown>) => void): Promise<{ remove: () => void }>;
+  addListener(event: 'ditado-comando' | 'ditado-parcial' | 'ditado-status' | 'ditado-erro' | 'ditado-pronto', cb: (d: Record<string, unknown>) => void): Promise<{ remove: () => void }>;
 }
 const Native = registerPlugin<DitadoPlugin>('Ditado');
 const isNative = Capacitor.isNativePlatform();
@@ -27,6 +27,8 @@ export interface DitadoHandlers {
   onParcial?: (texto: string) => void;
   onStatus?: (ouvindo: boolean) => void;
   onErro?: (mensagem: string) => void;
+  /** o microfone abriu de verdade e está pronto para captar a fala (confirma que não é só o loop) */
+  onPronto?: () => void;
 }
 
 export const ditado = {
@@ -41,6 +43,7 @@ export const ditado = {
         Native.addListener('ditado-parcial', (d) => h.onParcial?.(String(d.texto ?? ''))),
         Native.addListener('ditado-status', (d) => h.onStatus?.(!!d.ouvindo)),
         Native.addListener('ditado-erro', (d) => h.onErro?.(String(d.mensagem ?? ''))),
+        Native.addListener('ditado-pronto', () => h.onPronto?.()),
       ]);
       await Native.start();
       return () => {
@@ -69,6 +72,7 @@ export const ditado = {
         if (last.isFinal) h.onComando(last[0].transcript.trim());
         else h.onParcial?.(last[0].transcript);
       };
+      (r as unknown as { onstart: () => void }).onstart = () => h.onPronto?.();
       (r as unknown as { onend: () => void }).onend = () => {
         if (webWant) run();
         else h.onStatus?.(false);

@@ -16,6 +16,7 @@ export function AiEditPanel() {
   const notify = useEditor((s) => s.notify);
   const queue = useAiEditQueue();
   const [ligado, setLigado] = useState(false);
+  const [pronto, setPronto] = useState(false);
   const [parcial, setParcial] = useState('');
   const [texto, setTexto] = useState('');
   const [busy, setBusy] = useState(false);
@@ -28,6 +29,7 @@ export function AiEditPanel() {
       stop.current?.();
       stop.current = null;
       setLigado(false);
+      setPronto(false);
       setParcial('');
       return;
     }
@@ -35,14 +37,22 @@ export function AiEditPanel() {
       notify('Este aparelho não tem reconhecimento de voz.', 'error');
       return;
     }
+    setPronto(false);
     stop.current = await ditado.start({
       onComando: (t) => {
         setParcial('');
         if (t) queueCommand(t);
       },
-      onParcial: setParcial,
+      onParcial: (t) => {
+        setPronto(true);
+        setParcial(t);
+      },
+      onPronto: () => setPronto(true),
       onStatus: setLigado,
-      onErro: (m) => notify(m, 'error'),
+      onErro: (m) => {
+        notify(m, 'error');
+        setPronto(false);
+      },
     });
     setLigado(true);
   };
@@ -69,9 +79,9 @@ export function AiEditPanel() {
       <button className={`btn wide mic-btn ${ligado ? 'primary on' : ''}`} onClick={() => void toggle()} data-testid="mic-toggle">
         <IconMic /> {ligado ? 'Microfone ligado (toque para desligar)' : 'Ligar microfone'}
       </button>
-      {ligado && parcial && (
+      {ligado && (
         <p className="small muted mic-live" data-testid="mic-parcial">
-          Ouvindo: "{parcial}"
+          {parcial ? `Ouvindo: "${parcial}"` : pronto ? 'Microfone aberto, pode falar…' : 'Abrindo o microfone…'}
         </p>
       )}
       <div className="post-search">
