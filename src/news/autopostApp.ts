@@ -22,6 +22,7 @@ import { withTrendingHashtags } from './hashtags';
 import { styleCaption } from './unicodeStyle';
 import { listNews, siteActiveUsers, type SiteNews } from './websg';
 import { mediaInsights, onlineFollowers, collabUsernames, publishReel } from './instagram';
+import { keyEngagementWord, reorderByIgHeat } from './igEngagement';
 import { brt, learnedBoost, measure, normalizeState, postingSlots, recordActive, recordViews, report, type LearnState } from './learning';
 import { loadTones, noteTrackUse, resolveTone, TRECHO_S } from './tones';
 import { ensureDefaultTones } from './defaultTones';
@@ -62,6 +63,8 @@ const MAX_AGE_H = 12;
 /** Instagram: depois do horário, continua tentando por 1h30 (até 3 vezes) */
 const WINDOW_MIN = 90;
 const MAX_TRIES = 3;
+/** até 2 Reels por horário de pico (se tiver matéria boa o bastante pros dois) */
+const SLOT_CAP = 2;
 /** Instagram automático: no máximo 8 Reels por dia, espalhados (picos + a cada ~1h40 das 8h às 22h) */
 export const IG_MAX_DIA = 8;
 const IG_ESPACO_MIN = 100;
@@ -191,7 +194,8 @@ export function openSlot(st: LearnState, now: Date, tries: Record<string, number
     const [hh, mm] = s.split(':').map(Number);
     const t = hh! * 60 + mm!;
     const key = `${day} ${s}`;
-    if (nowMin >= t - 5 && nowMin <= t + WINDOW_MIN && !st.slotsUsed.includes(key) && (tries[key] ?? 0) < MAX_TRIES) return key;
+    const usos = st.slotsUsed.filter((x) => x === key).length;
+    if (nowMin >= t - 5 && nowMin <= t + WINDOW_MIN && usos < SLOT_CAP && (tries[key] ?? 0) < MAX_TRIES) return key;
   }
   return null;
 }
@@ -409,16 +413,26 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
   let n = chosen;
   if (!n) {
     const posted = new Set(st.stories.filter((s) => s.igId && s.siteId).map((s) => s.siteId!));
-    const best = bestForInstagram(sitePosts, posted, now);
-    if (!best) {
+    const ranked = rankForInstagram(sitePosts, posted, now);
+    if (!ranked.length) {
       log(st, 'Instagram: nenhuma matéria do blog com pelo menos 1 h no ar (últimas 24 h) que ainda não foi ao Instagram.');
       return false;
     }
-    n = best.item;
-    // prioridade: matéria COM vídeo, entre as que vão bem (pelo menos 40% da melhor)
+    // critério rígido: só entra quem ganhou a briga de engajamento no blog (metade de cima do dia); com poucas candidatas, não restringe
+    const medianaPh = [...ranked].map((c) => c.perHour).sort((a, b) => a - b)[Math.floor(ranked.length / 2)] ?? 0;
+    const fortes = ranked.length >= 4 ? ranked.filter((c) => c.perHour >= medianaPh) : ranked;
+    if (!fortes.length) {
+      log(st, 'Instagram: nenhuma matéria se destacou o suficiente hoje; não posta por postar.');
+      return false;
+    }
+    // desempate pelo que está engajando DE VERDADE no Instagram agora (hashtag do assunto), não só no nosso site
+    setStatus({ step: 'Comparando engajamento no Instagram…' });
+    const porCalor = await reorderByIgHeat(nativeIgHttp, { userId: ig.userId, token }, fortes, (c) => keyEngagementWord(c.item.categoria ?? '', null, []), 5);
+    if (porCalor[0]?.heat !== null && porCalor[0] !== undefined) log(st, `Instagram: "${porCalor[0].item.item.title}" é o assunto mais quente agora.`);
+    n = porCalor[0]!.item.item;
+    // dentro do que engaja bem, prioriza quem tem vídeo (sem perder a força do assunto)
     setStatus({ step: 'Procurando matéria com vídeo…' });
-    for (const c of rankForInstagram(sitePosts, posted, now).slice(0, 5)) {
-      if (c.perHour < best.perHour * 0.4) break;
+    for (const { item: c } of porCalor.slice(0, 4)) {
       const html = await nativeHttp.getText(c.item.url).then((r) => r.text).catch(() => '');
       if (html && articleVideos(html, c.item.url).length) {
         n = c.item;
@@ -426,7 +440,7 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
         break;
       }
     }
-    const ph = rankForInstagram(sitePosts, posted, now).find((c) => c.item.id === n!.id)?.perHour ?? best.perHour;
+    const ph = ranked.find((c) => c.item.id === n!.id)?.perHour ?? 0;
     log(st, `Instagram: escolhida "${n.title}" (${n.views} visualizações, ${ph.toFixed(0)}/h).`);
   } else log(st, `Instagram: postando "${n.title}" (escolhida na lista).`);
   const chat = aiChat(getAiKey(), nativePost);

@@ -21,6 +21,7 @@ export const IconTemplate = (p: I) => <P {...p} d={['M3.5 3.5h13v13h-13z', 'M3.5
 export const IconBlur = (p: I) => <P {...p} d={['M3.5 3.5h13v13h-13z']} strokeDasharray="2.2 2" />;
 export const IconElements = (p: I) => <P {...p} d={['M3.5 10.5h6v6h-6z', 'M14 3.5l3 5.2h-6z', 'M14 16.5a2.6 2.6 0 100-5.2 2.6 2.6 0 000 5.2z']} />;
 export const IconAudio = (p: I) => <P {...p} d={['M3 10v0', 'M6 7v6', 'M9 4v12', 'M12 7.5v5', 'M15 5.5v9', 'M18 9v2']} />;
+export const IconMic = (p: I) => <P {...p} d={['M10 3a2.4 2.4 0 00-2.4 2.4v4.6a2.4 2.4 0 004.8 0V5.4A2.4 2.4 0 0010 3z', 'M5.5 9.5a4.5 4.5 0 009 0', 'M10 14v3', 'M7.5 17h5']} />;
 export const IconPlay = (p: I) => <P {...p} d="M6 4l10 6-10 6z" fill="currentColor" />;
 export const IconPause = (p: I) => <P {...p} d={['M6.5 4.5v11', 'M13.5 4.5v11']} strokeWidth="2.4" />;
 export const IconSplit = (p: I) => <P {...p} d={['M10 2.5v15', 'M6.5 6L4 8.5 6.5 11', 'M13.5 6L16 8.5 13.5 11']} />;

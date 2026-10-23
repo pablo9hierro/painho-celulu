@@ -9,10 +9,12 @@ import { useEditor } from '../state/store';
 import { aiReady, getAiKey, setAiKey } from '../news/client';
 import { getIgConfig, getSiteConfig, instagramStatus, setIgConfig, setSiteConfig, siteTest, type IgStatus } from '../news/postadorClient';
 import { IconClose } from './icons';
+import { AiReportDialog } from './AiReportDialog';
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const notify = useEditor((s) => s.notify);
   useBackHandler(true, onClose);
+  const [report, setReport] = useState(false);
   const [ai, setAi] = useState(getAiKey);
   const [aiOk, setAiOk] = useState<boolean | null>(null);
   const [site, setSite] = useState(getSiteConfig);
@@ -62,6 +64,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="small muted">Tudo fica guardado só neste aparelho e continua aqui quando você atualiza o app.</p>
+        <button className="btn sm" onClick={() => setReport(true)} data-testid="open-ai-report">📊 Relatório de gasto com IA</button>
+        {report && <AiReportDialog onClose={() => setReport(false)} />}
 
         <section className="tone-card">
           <strong>IA (escrever matérias)</strong>

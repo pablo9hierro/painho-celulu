@@ -35,12 +35,14 @@ import {
   IconBrand,
   IconExport,
   IconMedia,
+  IconMic,
   IconRedo,
   IconText,
   IconUndo,
 } from './icons';
 
 const RAIL: { id: Panel; label: string; tip: string; icon: typeof IconMedia }[] = [
+  { id: 'ia', label: 'IA', tip: 'Editar com IA: comando de voz ou texto', icon: IconMic },
   { id: 'media', label: 'Mídia', tip: 'Mídia: importar vídeos e imagens', icon: IconMedia },
   { id: 'brand', label: 'Marca', tip: 'Marca: logos para cobrir marcas d’água', icon: IconBrand },
   { id: 'text', label: 'Manchetes', tip: 'Manchetes e molduras da Primeiras Notícias', icon: IconText },

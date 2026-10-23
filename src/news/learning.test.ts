@@ -101,7 +101,9 @@ describe('postador no celular: horário com novas tentativas', () => {
     expect(openSlot(st, at(100), {})).toBeNull(); // passou de 1h30
     expect(openSlot(st, at(10), { [key]: 3 })).toBeNull(); // 3 tentativas
     st.slotsUsed.push(key);
-    expect(openSlot(st, at(10), {})).toBeNull(); // já postou
+    expect(openSlot(st, at(10), {})).toBe(key); // até 2 por horário de pico (briga de engajamento pode render 2 boas)
+    st.slotsUsed.push(key);
+    expect(openSlot(st, at(10), {})).toBeNull(); // esse horário já deu os 2
   });
 });
 

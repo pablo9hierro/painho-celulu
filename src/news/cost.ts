@@ -74,6 +74,14 @@ const inBrowser = () => typeof window !== 'undefined' && typeof localStorage !==
 const isNativeApp = () => inBrowser() && !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
 
 /** registra uma chamada de IA feita NESTE aparelho */
+export interface AiCall {
+  at: string;
+  usd: number;
+  what: string;
+}
+const LOG_KEY = 'pn-ai-spend-log';
+const LOG_MAX = 2000;
+
 export function recordAi(usd: number, what = 'outros'): Spend {
   if (!inBrowser()) return emptySpend();
   const cur = getSpend();
@@ -82,6 +90,9 @@ export function recordAi(usd: number, what = 'outros'): Spend {
   const next = { usd: cur.usd + v, uses: cur.uses + 1, by: { ...cur.by, [what]: (cur.by[what] ?? 0) + v } };
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
+    const log = getAiLog();
+    log.push({ at: new Date().toISOString(), usd: v, what });
+    localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(-LOG_MAX)));
   } catch {
     /* sem armazenamento */
   }
@@ -89,6 +100,43 @@ export function recordAi(usd: number, what = 'outros'): Spend {
   window.dispatchEvent(new CustomEvent('pn-ai-spend', { detail: s }));
   return s;
 }
+
+/** cada chamada de IA feita neste aparelho (a mais recente por último) */
+export function getAiLog(): AiCall[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(LOG_KEY) ?? '[]') as AiCall[];
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.usd === 'number' && typeof x.at === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** agrupa por dia (chave AAAA-MM-DD, horário de Brasília) */
+export function aiLogByDay(log: AiCall[]): { dia: string; usd: number; uses: number }[] {
+  const by = new Map<string, { usd: number; uses: number }>();
+  for (const c of log) {
+    const dia = new Date(c.at).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const cur = by.get(dia) ?? { usd: 0, uses: 0 };
+    by.set(dia, { usd: cur.usd + c.usd, uses: cur.uses + 1 });
+  }
+  return [...by.entries()].map(([dia, v]) => ({ dia, ...v })).sort((a, b) => (a.dia < b.dia ? 1 : -1));
+}
+
+/** agrupa por semana (segunda-feira da semana, AAAA-MM-DD) */
+export function aiLogByWeek(log: AiCall[]): { semana: string; usd: number; uses: number }[] {
+  const by = new Map<string, { usd: number; uses: number }>();
+  for (const c of log) {
+    const d = new Date(c.at);
+    const local = new Date(d.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    const seg = new Date(local);
+    seg.setDate(local.getDate() - ((local.getDay() + 6) % 7));
+    const chave = seg.toLocaleDateString('sv-SE');
+    const cur = by.get(chave) ?? { usd: 0, uses: 0 };
+    by.set(chave, { usd: cur.usd + c.usd, uses: cur.uses + 1 });
+  }
+  return [...by.entries()].map(([semana, v]) => ({ semana, ...v })).sort((a, b) => (a.semana < b.semana ? 1 : -1));
+}
+
 const emptySpend = (): Spend => ({ usd: 0, uses: 0, sessionUsd: 0, sessionUses: 0, by: {} });
 
 /** custo que veio do servidor (PC). No celular a chamada já foi registrada pelo recordAi. */

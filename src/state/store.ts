@@ -11,7 +11,7 @@ const HISTORY_LIMIT = 200;
 const MERGE_WINDOW_MS = 800;
 
 export type Tool = 'select' | 'blur-rect' | 'blur-ellipse';
-export type Panel = 'media' | 'brand' | 'text' | 'blur' | 'audio';
+export type Panel = 'media' | 'brand' | 'text' | 'blur' | 'audio' | 'ia';
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
 interface EditorState {
