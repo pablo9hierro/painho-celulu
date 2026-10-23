@@ -54,23 +54,53 @@ export function brl(usd: number, rate: number): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
-/** Total gasto com IA neste aparelho (guardado localmente). */
+/**
+ * Gasto com IA neste aparelho: total acumulado (guardado) e desta sessão (desde
+ * que o app abriu), por função. Toda chamada de IA feita no aparelho entra aqui
+ * sozinha (recordAi); o que roda no servidor do PC entra pelo addSpend da tela.
+ */
 const KEY = 'pn-ai-spend';
-export function addSpend(usd: number): { usd: number; uses: number } {
+export interface Spend {
+  usd: number;
+  uses: number;
+  /** desta sessão */
+  sessionUsd: number;
+  sessionUses: number;
+  /** total por função (ex.: "legendas", "matéria", "post em vídeo") */
+  by: Record<string, number>;
+}
+let session = { usd: 0, uses: 0 };
+const inBrowser = () => typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+const isNativeApp = () => inBrowser() && !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
+
+/** registra uma chamada de IA feita NESTE aparelho */
+export function recordAi(usd: number, what = 'outros'): Spend {
+  if (!inBrowser()) return emptySpend();
   const cur = getSpend();
-  const next = { usd: cur.usd + Math.max(0, usd), uses: cur.uses + 1 };
+  const v = Math.max(0, usd || 0);
+  session = { usd: session.usd + v, uses: session.uses + 1 };
+  const next = { usd: cur.usd + v, uses: cur.uses + 1, by: { ...cur.by, [what]: (cur.by[what] ?? 0) + v } };
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     /* sem armazenamento */
   }
-  return next;
+  const s = { ...next, sessionUsd: session.usd, sessionUses: session.uses };
+  window.dispatchEvent(new CustomEvent('pn-ai-spend', { detail: s }));
+  return s;
 }
-export function getSpend(): { usd: number; uses: number } {
+const emptySpend = (): Spend => ({ usd: 0, uses: 0, sessionUsd: 0, sessionUses: 0, by: {} });
+
+/** custo que veio do servidor (PC). No celular a chamada já foi registrada pelo recordAi. */
+export function addSpend(usd: number, what = 'matéria'): Spend {
+  if (isNativeApp()) return getSpend();
+  return recordAi(usd, what);
+}
+export function getSpend(): Spend {
   try {
-    const j = JSON.parse(localStorage.getItem(KEY) ?? '{}') as { usd?: number; uses?: number };
-    return { usd: Number(j.usd) || 0, uses: Number(j.uses) || 0 };
+    const j = JSON.parse(localStorage.getItem(KEY) ?? '{}') as { usd?: number; uses?: number; by?: Record<string, number> };
+    return { usd: Number(j.usd) || 0, uses: Number(j.uses) || 0, sessionUsd: session.usd, sessionUses: session.uses, by: j.by && typeof j.by === 'object' ? j.by : {} };
   } catch {
-    return { usd: 0, uses: 0 };
+    return emptySpend();
   }
 }

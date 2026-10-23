@@ -30,6 +30,7 @@ import { getAiKey, nativeHttp, nativePost } from './client';
 import { siteList, getIgConfig, getSiteConfig, nativeIgHttp, nativePautaHttp, nativeSiteHttp, setIgConfig, withBase } from './postadorClient';
 import { firstPhoto, loadQueue, postToBlog } from './blogPost';
 import { videoTexts } from './videoTexts';
+import { downloadFromLink } from './downloadClient';
 import { createStoryVideo } from '../ui/storyVideo';
 import { exporter, media as mediaApi, projects } from '../platform/api';
 import { postadorNative } from '../platform/postadorNative';
@@ -47,6 +48,9 @@ const ST_KEY = 'pn-autopost-state';
 const RUN_KEY = 'pn-autopost-runs';
 const BLOG_KEY = 'pn-autopost-blog';
 const LOG_KEY = 'pn-autopost-log';
+const GAP_KEY = 'pn-ig-proximo';
+/** intervalo sorteado entre Reels automáticos (ms): 3 a 5 min */
+export const igGapMs = (rnd = Math.random()) => Math.round((3 + rnd * 2) * 60_000);
 
 /** blog: lote da manhã a partir das 7h (tenta até 12h se algo falhar) */
 export const BLOG_HOUR = 7;
@@ -58,6 +62,9 @@ const MAX_AGE_H = 12;
 /** Instagram: depois do horário, continua tentando por 1h30 (até 3 vezes) */
 const WINDOW_MIN = 90;
 const MAX_TRIES = 3;
+/** Instagram automático: no máximo 8 Reels por dia, espalhados (picos + a cada ~1h40 das 8h às 22h) */
+export const IG_MAX_DIA = 8;
+const IG_ESPACO_MIN = 100;
 
 export function getAutoConfig(): AutoConfig {
   try {
@@ -111,7 +118,12 @@ export interface BlogCtl {
   /** acabaram as pautas boas do dia (ou o lote foi completado) */
   done: boolean;
 }
-const emptyCtl = (): BlogCtl => ({ lastTry: null, day: '', count: 0, done: false });
+const emptyCtl = (): BlogCtl => ({
+  lastTry: null,
+  day: '',
+  count: 0,
+  done: false,
+});
 
 // ---------------------------------------------------------------- status ao vivo
 
@@ -125,7 +137,13 @@ export interface AutoStatus {
   queue: string[];
   last: { ok: boolean; msg: string; at: string } | null;
 }
-let status: AutoStatus = { job: null, step: '', pct: null, queue: [], last: null };
+let status: AutoStatus = {
+  job: null,
+  step: '',
+  pct: null,
+  queue: [],
+  last: null,
+};
 const listeners = new Set<(s: AutoStatus) => void>();
 export function getAutopostStatus(): AutoStatus {
   return status;
@@ -192,10 +210,29 @@ export function blogDue(ctl: BlogCtl, now: Date): boolean {
  * (com pelo menos 1 h no ar para os números valerem), que ainda não foram ao
  * Instagram, a de mais visualizações por hora.
  */
+export function rankForInstagram(list: SiteNews[], postedSiteIds: Set<number>, now: Date): { item: SiteNews; perHour: number }[] {
+  return list
+    .filter((n) => n.date && typeof n.views === 'number' && !postedSiteIds.has(n.id) && !/revis|inativ|agend/i.test(n.status ?? ''))
+    .map((n) => ({ item: n, age: (now.getTime() - new Date(n.date!).getTime()) / 3600_000 }))
+    .filter((x) => x.age >= 1 && x.age <= 24)
+    .map((x) => ({ item: x.item, perHour: x.item.views! / Math.max(1, x.age) }))
+    .sort((a, b) => b.perHour - a.perHour);
+}
+
+/** vídeos da matéria que dá para baixar (arquivo ou Instagram; YouTube não) */
+function articleVideos(html: string, url: string): string[] {
+  return extractBlocks(html, url)
+    .blocks.filter((b) => b.type === 'video' && b.src && (b.kind === 'arquivo' || b.kind === 'instagram'))
+    .map((b) => b.src!);
+}
+
 export function bestForInstagram(list: SiteNews[], postedSiteIds: Set<number>, now: Date): { item: SiteNews; perHour: number } | null {
   const scored = list
     .filter((n) => n.date && typeof n.views === 'number' && !postedSiteIds.has(n.id) && !/revis|inativ|agend/i.test(n.status ?? ''))
-    .map((n) => ({ item: n, age: (now.getTime() - new Date(n.date!).getTime()) / 3600_000 }))
+    .map((n) => ({
+      item: n,
+      age: (now.getTime() - new Date(n.date!).getTime()) / 3600_000,
+    }))
     .filter((x) => x.age >= 1 && x.age <= 24)
     .map((x) => ({ item: x.item, perHour: x.item.views! / Math.max(1, x.age) }))
     .sort((a, b) => b.perHour - a.perHour);
@@ -210,26 +247,47 @@ export function hasAacAudio(mp4: Uint8Array): boolean {
   return false;
 }
 
-async function renderVideo(input: Parameters<typeof createStoryVideo>[0]): Promise<Uint8Array> {
+/** Monta e grava o vídeo. `cleanup` apaga do aparelho o projeto, a foto e o vídeo (a música fica para os próximos). */
+async function renderVideo(input: Parameters<typeof createStoryVideo>[0]): Promise<{ bytes: Uint8Array; cleanup: () => Promise<void> }> {
   setStatus({ step: 'Montando o vídeo (foto, moldura e música)…', pct: null });
   const id = await createStoryVideo(input);
   const p = await projects.get(id);
-  if (!p.clips.some((c) => c.type === 'audio')) throw new Error('o vídeo ficou sem música; não foi postado');
-  const ids = [...new Set(p.clips.map((c) => ('mediaId' in c ? (c as { mediaId: string }).mediaId : '')).filter(Boolean))];
-  const media: Record<string, MediaAsset> = {};
-  for (const m of ids) media[m] = await mediaApi.get(m);
-  const { blob } = await exporter.exportVideo(
-    p,
-    media,
-    { width: p.width, height: p.height, fps: 30, duration: projectDuration(p), crf: 20 },
-    (pr) => setStatus({ step: 'Gravando o vídeo', pct: pr.total ? Math.min(1, pr.frame / pr.total) : null }),
-    new AbortController().signal,
-  );
-  setStatus({ pct: null });
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  // nunca posta mudo: confere a faixa de áudio no arquivo final
-  if (!hasAacAudio(bytes)) throw new Error('o vídeo saiu sem áudio AAC neste aparelho; não foi postado');
-  return bytes;
+  const temp = [...new Set(p.clips.filter((c) => c.type === 'image' || c.type === 'video').map((c) => (c as { mediaId: string }).mediaId))];
+  const cleanup = async () => {
+    await projects.remove(id).catch(() => undefined);
+    for (const m of temp) await mediaApi.remove(m).catch(() => undefined);
+  };
+  try {
+    if (!p.clips.some((c) => c.type === 'audio')) throw new Error('o vídeo ficou sem música; não foi postado');
+    const ids = [...new Set(p.clips.map((c) => ('mediaId' in c ? (c as { mediaId: string }).mediaId : '')).filter(Boolean))];
+    const media: Record<string, MediaAsset> = {};
+    for (const m of ids) media[m] = await mediaApi.get(m);
+    const { blob } = await exporter.exportVideo(
+      p,
+      media,
+      {
+        width: p.width,
+        height: p.height,
+        fps: 30,
+        duration: projectDuration(p),
+        crf: 20,
+      },
+      (pr) =>
+        setStatus({
+          step: 'Gravando o vídeo',
+          pct: pr.total ? Math.min(1, pr.frame / pr.total) : null,
+        }),
+      new AbortController().signal,
+    );
+    setStatus({ pct: null });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    // nunca posta mudo: confere a faixa de áudio no arquivo final
+    if (!hasAacAudio(bytes)) throw new Error('o vídeo saiu sem áudio AAC neste aparelho; não foi postado');
+    return { bytes, cleanup };
+  } catch (e) {
+    await cleanup();
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------- estatística
@@ -285,13 +343,20 @@ export async function blogBatch(st: LearnState, sitePosts: SiteNews[], max: numb
     /* sem trends */
   }
   setStatus({ step: 'Capturando as notícias de agora…' });
-  const pautas = await capturePautas(nativePautaHttp, { window: '1d', trending, maxAgeHours: MAX_AGE_H });
+  const pautas = await capturePautas(nativePautaHttp, {
+    window: '1d',
+    trending,
+    maxAgeHours: MAX_AGE_H,
+  });
   const onSite = [...sitePosts.map((n) => n.title), ...loadQueue().map((q) => q.story.titulo), ...loadQueue().map((q) => q.pautaTitulo)];
   const fresh = pautas
     .filter((p) => p.readable && p.paragraphs >= 3 && p.imagesOk >= 1)
     // não repete o que já está no site (do app ou da redação)
     .filter((p) => !onSite.some((t) => sameStory(t, p.title)) && !loadQueue().some((q) => q.pautaUrl === p.url))
-    .map((p) => ({ p, score: p.score + learnedBoost(st, { title: p.title, city: p.city }).pts }))
+    .map((p) => ({
+      p,
+      score: p.score + learnedBoost(st, { title: p.title, city: p.city }).pts,
+    }))
     .sort((a, b) => b.score - a.score);
   // a mesma notícia de dois portais conta uma vez só
   const picks: Pauta[] = [];
@@ -305,9 +370,13 @@ export async function blogBatch(st: LearnState, sitePosts: SiteNews[], max: numb
   let fails = 0;
   for (const pick of picks) {
     if (ok >= max || fails >= 3) break;
-    setStatus({ step: `Blog ${ok + 1} de ${Math.min(max, picks.length)}: escrevendo "${pick.title.slice(0, 60)}"…` });
+    setStatus({
+      step: `Blog ${ok + 1} de ${Math.min(max, picks.length)}: escrevendo "${pick.title.slice(0, 60)}"…`,
+    });
     try {
-      const r = await postToBlog(pick, { onStep: (s) => setStatus({ step: `Blog ${ok + 1}: ${s}` }) });
+      const r = await postToBlog(pick, {
+        onStep: (s) => setStatus({ step: `Blog ${ok + 1}: ${s}` }),
+      });
       ok++;
       log(st, `Blog: publicada "${r.story.titulo}"${r.siteId ? ` (nº ${r.siteId})` : ''}.`);
       if (ctl) {
@@ -325,6 +394,7 @@ export async function blogBatch(st: LearnState, sitePosts: SiteNews[], max: numb
 
 // ---------------------------------------------------------------- INSTAGRAM: matéria do blog vira Reels
 
+const pageCache = new Map<string, string>();
 const meta = (html: string, p: string) => new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]*content=["']([^"']*)["']`, 'i').exec(html)?.[1] ?? '';
 
 /** Posta UMA matéria do blog como Reels (a escolhida na mão ou a melhor). */
@@ -345,12 +415,26 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
       return false;
     }
     n = best.item;
-    log(st, `Instagram: a melhor do blog é "${n.title}" (${n.views} visualizações, ${best.perHour.toFixed(0)}/h).`);
+    // prioridade: matéria COM vídeo, entre as que vão bem (pelo menos 40% da melhor)
+    setStatus({ step: 'Procurando matéria com vídeo…' });
+    for (const c of rankForInstagram(sitePosts, posted, now).slice(0, 5)) {
+      if (c.perHour < best.perHour * 0.4) break;
+      const html = await nativeHttp.getText(c.item.url).then((r) => r.text).catch(() => '');
+      if (html && articleVideos(html, c.item.url).length) {
+        n = c.item;
+        pageCache.set(c.item.url, html);
+        break;
+      }
+    }
+    const ph = rankForInstagram(sitePosts, posted, now).find((c) => c.item.id === n!.id)?.perHour ?? best.perHour;
+    log(st, `Instagram: escolhida "${n.title}" (${n.views} visualizações, ${ph.toFixed(0)}/h).`);
   } else log(st, `Instagram: postando "${n.title}" (escolhida na lista).`);
   const chat = aiChat(getAiKey(), nativePost);
   setStatus({ step: 'Lendo a matéria…' });
   // dados da matéria: do app (já tem tudo) ou da página pública do site
   const mine = loadQueue().find((q) => q.siteId === n.id);
+  const html = pageCache.get(n.url) ?? (await nativeHttp.getText(n.url).then((r) => r.text).catch(() => ''));
+  pageCache.clear();
   let titulo = n.title;
   let subtitulo = '';
   let categoria = n.categoria ?? 'Notícia';
@@ -363,11 +447,26 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
     texto = mine.story.paragrafos.join('\n');
     imagens = mine.story.imagens;
   } else {
-    const page = await nativeHttp.getText(n.url);
+    const page = { text: html };
     const ex = extractBlocks(page.text, n.url);
-    texto = ex.blocks.filter((b) => b.type === 'p').map((b) => b.text).join('\n');
+    texto = ex.blocks
+      .filter((b) => b.type === 'p')
+      .map((b) => b.text)
+      .join('\n');
     subtitulo = meta(page.text, 'og:description') || meta(page.text, 'description');
     imagens = [...(ex.ogImage ? [{ src: ex.ogImage }] : []), ...ex.blocks.filter((b) => b.type === 'img' && b.src).map((b) => ({ src: b.src! }))];
+  }
+  // vídeo da matéria (se tiver): entra no lugar da foto, sem o som original
+  let videoFile: File | null = null;
+  for (const src of html ? articleVideos(html, n.url).slice(0, 2) : []) {
+    setStatus({ step: 'Baixando o vídeo da matéria…' });
+    try {
+      videoFile = (await downloadFromLink(src)).file;
+      log(st, 'Instagram: a matéria tem vídeo; o post vai com o vídeo.');
+      break;
+    } catch (e) {
+      log(st, `Instagram: vídeo da matéria não baixou (${(e as Error).message}); vai com a foto.`);
+    }
   }
   setStatus({ step: 'Baixando a foto…' });
   const photo = await firstPhoto(imagens, n.url);
@@ -378,37 +477,75 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
   // título curto e direto + subtítulo que cabe, destaque e música (uma chamada à IA)
   setStatus({ step: 'Resumindo título e subtítulo para o vídeo…' });
   await ensureDefaultTones();
-  const vt = await videoTexts(chat, { titulo, subtitulo, texto, palavras, destaque: mine?.story.destaque });
+  const vt = await videoTexts(chat, {
+    titulo,
+    subtitulo,
+    texto,
+    palavras,
+    destaque: mine?.story.destaque,
+  });
   const tone = resolveTone(loadTones(), vt.tom, vt.audio, `${titulo} ${texto.slice(0, 2000)}`, categoria);
   if (!tone) throw new Error('nenhuma música cadastrada nos tons; o post não sai sem música');
-  const video = await renderVideo({
+  const { bytes: video, cleanup } = await renderVideo({
     kicker: categoria,
     title: vt.titulo,
     subtitle: vt.subtitulo,
     keywords: [vt.destaque ?? '', ...palavras].filter(Boolean),
     photo,
+    video: videoFile,
     audioId: tone.track.mediaId,
     audioStart: tone.track.inicio,
     audioDur: tone.track.dur ?? TRECHO_S,
   });
   noteTrackUse(tone.track.name);
   log(st, `Instagram: vídeo pronto com a música "${tone.track.name}".`);
-  setStatus({ step: 'Escrevendo a legenda…' });
-  const texts = [{ url: n.url, title: titulo, source: 'Primeiras Notícias', date: n.date ?? null, text: texto }];
-  let caption = '';
   try {
-    caption = styleCaption((await withTrendingHashtags(await writeStory(titulo, texts, chat, 'Legenda do Reels com o post em vídeo desta matéria.'), texts, nativeHttp)).text);
-  } catch {
-    /* reserva abaixo */
+    setStatus({ step: 'Escrevendo a legenda…' });
+    const texts = [
+      {
+        url: n.url,
+        title: titulo,
+        source: 'Primeiras Notícias',
+        date: n.date ?? null,
+        text: texto,
+      },
+    ];
+    let caption = '';
+    try {
+      caption = styleCaption((await withTrendingHashtags(await writeStory(titulo, texts, chat, 'Legenda do Reels com o post em vídeo desta matéria.'), texts, nativeHttp)).text);
+    } catch {
+      /* reserva abaixo */
+    }
+    if (!caption) caption = `${titulo}\n\n${vt.subtitulo}\n\nMatéria completa em primeirasnoticias.com.br`;
+    setStatus({ step: 'Enviando ao Instagram…' });
+    const r = await publishReel(nativeIgHttp, { userId: ig.userId, token }, video, caption, {
+      coverAtMs: 7500,
+      collaborators: collabUsernames(ig.collab),
+      // nome do áudio original do Reels (a música que já está no vídeo)
+      audioName: `Primeiras Notícias · ${tone.track.name.replace(/^\w+ - /, '')}`,
+      log: (m) => log(st, `Instagram: ${m}`),
+    });
+    writeJson(GAP_KEY, { at: new Date(Date.now() + igGapMs()).toISOString() });
+    st.stories.push({
+      url: n.url,
+      title: titulo,
+      categoria,
+      keywords: palavras,
+      tom: tone.tone.name,
+      destaque: vt.destaque,
+      postedAt: now.toISOString(),
+      siteId: n.id,
+      igId: r.id,
+    });
+    st.stories = st.stories.slice(-400);
+    saveState(st);
+    log(st, `Instagram: Reels publicado ("${vt.titulo}").`);
+    return true;
+  } finally {
+    // só serve para postar: apaga do aparelho a foto, o projeto e o vídeo
+    await cleanup();
+    log(st, 'Instagram: foto e vídeo apagados do aparelho.');
   }
-  if (!caption) caption = `${titulo}\n\n${vt.subtitulo}\n\nMatéria completa em primeirasnoticias.com.br`;
-  setStatus({ step: 'Enviando ao Instagram…' });
-  const r = await publishReel(nativeIgHttp, { userId: ig.userId, token }, video, caption, { coverAtMs: 7500, collaborators: collabUsernames(ig.collab), log: (m) => log(st, `Instagram: ${m}`) });
-  st.stories.push({ url: n.url, title: titulo, categoria, keywords: palavras, tom: tone.tone.name, destaque: vt.destaque, postedAt: now.toISOString(), siteId: n.id, igId: r.id });
-  st.stories = st.stories.slice(-400);
-  saveState(st);
-  log(st, `Instagram: Reels publicado ("${vt.titulo}").`);
-  return true;
 }
 
 /** Matérias publicadas no blog para a lista do Instagram (as mais novas primeiro). */
@@ -423,7 +560,11 @@ export async function instagramList(): Promise<(SiteNews & { noInstagram: boolea
     .filter((n) => !/revis|inativ|agend/i.test(n.status ?? ''))
     .map((n) => {
       const age = n.date ? (now - new Date(n.date).getTime()) / 3600_000 : null;
-      return { ...n, noInstagram: posted.has(n.id), perHour: age !== null && typeof n.views === 'number' ? n.views / Math.max(1, age) : null };
+      return {
+        ...n,
+        noInstagram: posted.has(n.id),
+        perHour: age !== null && typeof n.views === 'number' ? n.views / Math.max(1, age) : null,
+      };
     });
 }
 
@@ -431,7 +572,11 @@ export async function instagramList(): Promise<(SiteNews & { noInstagram: boolea
 
 export type Job = { kind: 'auto' } | { kind: 'blog' } | { kind: 'instagram'; item?: SiteNews };
 const JOB_NAME = (j: Job) => (j.kind === 'auto' ? 'Automático' : j.kind === 'blog' ? 'Blog' : j.item ? `Instagram: ${j.item.title.slice(0, 40)}` : 'Instagram (a melhor)');
-const queue: { job: Job; done: (ok: boolean) => void; fail: (e: Error) => void }[] = [];
+const queue: {
+  job: Job;
+  done: (ok: boolean) => void;
+  fail: (e: Error) => void;
+}[] = [];
 let pumping = false;
 
 /**
@@ -440,7 +585,7 @@ let pumping = false;
  */
 export function runJob(job: Job): Promise<boolean> {
   // o relógio não empilha: um automático por vez
-  if (job.kind === 'auto' && ((status.job === 'Automático') || queue.some((q) => q.job.kind === 'auto'))) return Promise.resolve(false);
+  if (job.kind === 'auto' && (status.job === 'Automático' || queue.some((q) => q.job.kind === 'auto'))) return Promise.resolve(false);
   return new Promise<boolean>((done, fail) => {
     queue.push({ job, done, fail });
     setStatus({ queue: queue.map((q) => JOB_NAME(q.job)) });
@@ -455,17 +600,35 @@ async function pump() {
     while (queue.length) {
       const q = queue.shift()!;
       const name = JOB_NAME(q.job);
-      setStatus({ job: name, step: 'Começando…', pct: null, queue: queue.map((x) => JOB_NAME(x.job)) });
+      setStatus({
+        job: name,
+        step: 'Começando…',
+        pct: null,
+        queue: queue.map((x) => JOB_NAME(x.job)),
+      });
       // celular: segura o app trabalhando fora da tela
       if (q.job.kind !== 'auto') await postadorNative.aviso(`${name}: começando…`);
       try {
         const ok = await execute(q.job);
-        if (q.job.kind !== 'auto' || ok) setStatus({ last: { ok, msg: ok ? `${name}: feito ✓` : `${name}: ${status.step}`, at: new Date().toISOString() } });
+        if (q.job.kind !== 'auto' || ok)
+          setStatus({
+            last: {
+              ok,
+              msg: ok ? `${name}: feito ✓` : `${name}: ${status.step}`,
+              at: new Date().toISOString(),
+            },
+          });
         q.done(ok);
       } catch (e) {
         const msg = (e as Error).message;
         log(null, `${name} falhou: ${msg}`);
-        setStatus({ last: { ok: false, msg: `${name} falhou: ${msg}`, at: new Date().toISOString() } });
+        setStatus({
+          last: {
+            ok: false,
+            msg: `${name} falhou: ${msg}`,
+            at: new Date().toISOString(),
+          },
+        });
         q.fail(e as Error);
       }
     }
@@ -487,7 +650,11 @@ async function execute(job: Job): Promise<boolean> {
     if (ig.igToken || ig.fbToken) {
       const r = await maintainTokens(nativeIgHttp, { igToken: ig.igToken || undefined }, ig.meta, now).catch(() => null);
       if (r) {
-        setIgConfig({ ...ig, igToken: r.igToken ?? ig.igToken, meta: { ...r.meta, igToken: undefined } });
+        setIgConfig({
+          ...ig,
+          igToken: r.igToken ?? ig.igToken,
+          meta: { ...r.meta, igToken: undefined },
+        });
         for (const l of [...r.log, ...r.warnings]) log(st, `Instagram: ${l}`);
       }
     }
@@ -514,9 +681,21 @@ async function execute(job: Job): Promise<boolean> {
     }
     // INSTAGRAM nos horários de pico: a melhor do blog
     const tries = readJson<Record<string, number>>(RUN_KEY, {});
+    const hoje = brt(now).day;
+    const doDia = st.stories.filter((s) => s.igId && brt(new Date(s.postedAt)).day === hoje);
+    if (doDia.length >= IG_MAX_DIA) return did;
     const slot = openSlot(st, now, tries);
-    if (!slot) return did;
-    tries[slot] = (tries[slot] ?? 0) + 1;
+    const ultimo = st.stories.filter((s) => s.igId).reduce((m, s) => Math.max(m, new Date(s.postedAt).getTime()), 0);
+    const { h: hora } = brt(now);
+    const espacado = hora >= 8 && hora < 22 && now.getTime() - ultimo >= IG_ESPACO_MIN * 60_000;
+    if (!slot && !espacado) return did;
+    // automático: espera 3 a 5 min (sorteado) depois do último Reels, para não parecer disparo em massa
+    const next = readJson<{ at: string | null }>(GAP_KEY, { at: null }).at;
+    if (next && now.getTime() < new Date(next).getTime()) {
+      log(st, `Instagram: aguardando o intervalo (até ${new Date(next).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}).`);
+      return did;
+    }
+    if (slot) tries[slot] = (tries[slot] ?? 0) + 1;
     writeJson(RUN_KEY, Object.fromEntries(Object.entries(tries).slice(-40)));
     let ok = false;
     try {
@@ -524,7 +703,7 @@ async function execute(job: Job): Promise<boolean> {
     } catch (e) {
       log(st, `Instagram falhou: ${(e as Error).message}. Tenta de novo no próximo tique.`);
     }
-    if (ok || tries[slot]! >= MAX_TRIES) st.slotsUsed.push(slot);
+    if (slot && (ok || tries[slot]! >= MAX_TRIES)) st.slotsUsed.push(slot);
     return ok || did;
   } finally {
     // não perde o que outro trabalho gravou no meio (ex.: posts)

@@ -56,8 +56,9 @@ test('Postagem: busca notícias, mostra cards e escreve a legenda (back-end simu
       },
     });
   });
-  await reel(page, false);
-  await page.getByTestId('open-post').click();
+  // a matéria sai da tela inicial (no editor ela aparece só depois de exportar)
+  await page.goto('/');
+  await page.getByTestId('hub-news').click();
   await page.getByTestId('post-query').fill('preso Santa Rita');
   await page.getByTestId('post-search').click();
   await expect(page.getByTestId('post-card')).toHaveCount(2);

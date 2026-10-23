@@ -29,9 +29,24 @@ export interface FrameDef {
   /** @perfil: centro vertical em fração, ou null */
   handle: number | null;
   ticker: boolean;
+  /** só para o post automático (não aparece na lista do editor) */
+  hidden?: boolean;
 }
 
 export const FRAMES: FrameDef[] = [
+  {
+    // post de matéria no Reels: foto e manchete dentro do recorte 3:4 da grade do
+    // perfil (12,5% a 87,5% da altura) e acima dos botões/legenda do Instagram
+    id: 'reels-post',
+    name: 'Post do Reels',
+    description: 'Foto e manchete no alto: aparecem inteiras na miniatura do perfil e longe dos botões do Instagram.',
+    window: { x: 0, y: 0.13, w: 1, h: 0.34 },
+    logo: { cx: 0.5, cy: 0.065, w: 0.44 },
+    logoFill: true,
+    handle: 0.958,
+    ticker: false,
+    hidden: true,
+  },
   {
     id: 'topo',
     name: 'Vídeo no topo',
@@ -85,7 +100,7 @@ export const FRAMES: FrameDef[] = [
 export const DEFAULT_TICKER = 'Acompanhe as principais notícias da Paraíba e do Brasil em primeirasnoticias.com.br';
 
 export function getFrame(id: string): FrameDef {
-  return FRAMES.find((f) => f.id === id) ?? FRAMES[0]!;
+  return FRAMES.find((f) => f.id === id) ?? FRAMES.find((f) => !f.hidden)!;
 }
 
 export function frameWindow(def: FrameDef, W: number, H: number) {

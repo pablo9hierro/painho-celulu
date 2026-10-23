@@ -113,7 +113,7 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
   expect(text.fields!.title).toBe('Polícia *prende dois suspeitos* de assalto em Bayeux');
   // chapéu = editoria da matéria (mais confiável que o minititulo da IA)
   expect(text.fields!.kicker).toBe('Policial');
-  expect(cs.some((c) => c.type === 'frame' && c.frame === 'central')).toBe(true);
+  expect(cs.some((c) => c.type === 'frame' && c.frame === 'reels-post')).toBe(true);
   expect(cs.some((c) => c.type === 'image')).toBe(true);
   expect(cs.find((c) => c.type === 'audio')?.name).toContain('tensao-grave');
   // o post tem o tamanho do trecho da música (15 s por padrão)
@@ -224,7 +224,7 @@ test('Tons que vêm no app: 17 trilhas com o melhor trecho marcado; desliza para
 test('Configurações: um lugar só, salva e continua lá; ordem dos botões da tela inicial', async ({ page }) => {
   await page.goto('/');
   const hub = await page.locator('.home-hub .hub-card').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
-  expect(hub).toEqual(['hub-download', 'hub-postador', 'hub-trends', 'hub-news', 'hub-edit']);
+  expect(hub).toEqual(['hub-download', 'hub-edit', 'hub-postador', 'hub-trends', 'hub-news']);
   await page.getByTestId('open-settings').click();
   await page.getByTestId('cfg-ai').fill('sk-or-teste');
   await page.getByTestId('cfg-site-user').fill('usuario-teste');

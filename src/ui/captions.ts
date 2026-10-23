@@ -9,7 +9,7 @@ import { createTextClip } from '../core/factory';
 import { newTrack, placeClip, projectDuration } from '../core/timeline';
 import { mixAudioWindows } from '../engine/webcodecsExporter';
 import { getAiKey } from '../news/client';
-import { splitSegments, transcribeWav, wordTimes, type Falante, type Segmento } from '../news/transcribe';
+import { alignSegments, speechRegions, splitSegments, transcribeWav, wordTimes, wordTimesVoiced, type Falante, type Regiao, type Segmento } from '../news/transcribe';
 import { getEditor } from '../state/store';
 
 export const CAPTION_PRESET = 'pn-legenda';
@@ -64,8 +64,8 @@ function rms(pcm: Float32Array): number {
 }
 
 /** Cria os itens de legenda (puro: testável). */
-export function buildCaptionClips(p: Project, segs: Segmento[], look: CaptionLook, upper: boolean, extra: { linhas?: number; align?: 'left' | 'center' | 'right' } = {}): TextClip[] {
-  return splitSegments(segs).map((s) => {
+export function buildCaptionClips(p: Project, segs: Segmento[], look: CaptionLook, upper: boolean, extra: { linhas?: number; align?: 'left' | 'center' | 'right' } = {}, regs: Regiao[] = []): TextClip[] {
+  return splitSegments(alignSegments(segs, regs)).map((s) => {
     const c = createTextClip(p, CAPTION_PRESET, s.inicio);
     // mesma caixa das legendas que já existem (o usuário pode ter mexido)
     const prev = p.clips.find((x): x is TextClip => x.type === 'text' && x.preset === CAPTION_PRESET);
@@ -77,7 +77,7 @@ export function buildCaptionClips(p: Project, segs: Segmento[], look: CaptionLoo
       ...(prev ? { transform: { ...prev.transform } } : {}),
       fields: { ...c.fields, title: s.texto },
       style: { ...c.style, uppercase: upper, ...(extra.align ? { align: extra.align } : {}) },
-      caption: { words: wordTimes(s.texto, duration * 0.92), speaker: s.falante, look, ...(extra.linhas ? { linhas: extra.linhas } : {}) },
+      caption: { words: regs.length ? wordTimesVoiced(s.texto, s.inicio, s.inicio + duration, regs) : wordTimes(s.texto, duration * 0.92), speaker: s.falante, look, ...(extra.linhas ? { linhas: extra.linhas } : {}) },
     };
   });
 }
@@ -129,6 +129,8 @@ export async function generateCaptions(opts: { look: CaptionLook; upper: boolean
   flush();
   if (!has || !chunks.length) throw new Error('Este projeto não tem áudio com fala.');
   const all: Segmento[] = [];
+  // onde tem voz de verdade (para encostar as legendas na fala)
+  const regs: Regiao[] = chunks.flatMap((c) => speechRegions(c.pcm, RATE, c.start));
   let falantes: Falante[] = [];
   let cost = 0;
   for (let i = 0; i < chunks.length; i++) {
@@ -142,7 +144,7 @@ export async function generateCaptions(opts: { look: CaptionLook; upper: boolean
     for (const seg of r.segmentos) all.push({ ...seg, inicio: seg.inicio + ch.start, fim: seg.fim + ch.start });
   }
   if (!all.length) throw new Error('A IA não encontrou fala neste vídeo.');
-  const clips = buildCaptionClips(getEditor().project ?? p, all, opts.look, opts.upper, { linhas: opts.linhas, align: opts.align });
+  const clips = buildCaptionClips(getEditor().project ?? p, all, opts.look, opts.upper, { linhas: opts.linhas, align: opts.align }, regs);
   getEditor().apply((pr) => applyCaptions(pr, clips));
   const speakers = new Set(all.map((x) => x.falante)).size;
   return { count: clips.length, falantes: speakers, costUsd: cost };

@@ -74,7 +74,7 @@ export async function publishReel(
   c: IgConfig,
   video: Uint8Array,
   caption: string,
-  opts: { coverAtMs?: number; shareToFeed?: boolean; log?: (m: string) => void; /** convite de collab (usernames sem @) */ collaborators?: string[] } = {},
+  opts: { coverAtMs?: number; shareToFeed?: boolean; log?: (m: string) => void; /** convite de collab (usernames sem @) */ collaborators?: string[]; /** nome do áudio original */ audioName?: string } = {},
 ): Promise<{ id: string; containerId: string; collab: string[] }> {
   if (!c.userId || !c.token) throw new Error('Configure o ID da conta e o token do Instagram.');
   const log = opts.log;
@@ -90,6 +90,7 @@ export async function publishReel(
             ...(opts.coverAtMs !== undefined ? { thumb_offset: String(Math.round(opts.coverAtMs)) } : {}),
             // convite de collab: a outra conta aceita no app dela e o Reel aparece nos dois perfis
             ...(collab.length ? { collaborators: JSON.stringify(collab) } : {}),
+            ...(opts.audioName ? { audio_name: opts.audioName.slice(0, 80) } : {}),
             access_token: c.token,
           }),
         ),

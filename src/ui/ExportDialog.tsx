@@ -221,7 +221,7 @@ export function ExportDialog({ onClose, onPost }: { onClose: () => void; onPost?
                 </div>
                 {onPost && (
                   <button className="btn primary wide post-next" onClick={() => onPost(result.file)} data-testid="go-post">
-                    Seguir para postagem · escrever a matéria
+                    Publicar no Instagram · escrever a legenda
                   </button>
                 )}
                 <div>

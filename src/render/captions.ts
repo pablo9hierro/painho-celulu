@@ -34,6 +34,8 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
   const words = cap?.words.length && cap.words.map((x) => x.w).join(' ') === typed ? cap.words : wordTimes(typed, c.duration * 0.92);
   if (!words.length) return;
   const look = cap?.look ?? 'limpa';
+  const boxed = look === 'caixa' || look === 'caixa-destaque';
+  const karaoke = look === 'destaque' || look === 'caixa-destaque';
   const color = SPEAKER_COLORS[((cap?.speaker ?? 1) - 1) % SPEAKER_COLORS.length]!;
   const upper = c.style.uppercase;
   // a ALTURA da caixa define o tamanho da letra (esticar em cima/embaixo ou pelo canto
@@ -86,7 +88,7 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
     const width = line.reduce((s, x) => s + x.w, 0) + space * (line.length - 1);
     let x = align === 'left' ? w * 0.02 : align === 'right' ? w * 0.98 - width : (w - width) / 2;
     const yc = y0 + li * lh + lh / 2;
-    if (look === 'caixa') {
+    if (boxed) {
       const padX = size * 0.45;
       const padY = size * 0.18;
       ctx.save();
@@ -107,7 +109,7 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
       ctx.restore();
     }
     for (const word of line) {
-      const active = look === 'destaque' && word.i === cur;
+      const active = karaoke && word.i === cur;
       const said = word.i <= cur;
       if (active) {
         // pílula azul da marca atrás da palavra falada, com um leve pulo
@@ -134,7 +136,7 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
         ctx.restore();
       } else {
         ctx.save();
-        if (look !== 'caixa') {
+        if (!boxed) {
           // contorno fino + sombra suave: lê sobre qualquer imagem sem ficar "grosso"
           ctx.lineJoin = 'round';
           // contorno desenhado POR BAIXO do preenchimento: aparece ~7% do corpo em volta de cada letra
@@ -148,7 +150,7 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
           ctx.shadowOffsetY = 0;
         }
         ctx.fillStyle = color;
-        if (look === 'destaque' && !said) ctx.globalAlpha *= 0.72;
+        if (karaoke && !said) ctx.globalAlpha *= 0.72;
         ctx.fillText(word.text, x, yc + size * 0.04);
         ctx.restore();
       }

@@ -6,7 +6,7 @@
  * Modelo: Gemini 2.5 Flash Lite (pago); se falhar, Gemini 2.5 Flash. Nada gratuito.
  */
 import type { Chat, ChatMessage } from './writer';
-import { estimateUsd } from './cost';
+import { estimateUsd, recordAi } from './cost';
 
 /** OpenRouter: Gemini 2.5 Flash Lite (escolha do usuário); reserva: Gemini 2.5 Flash, também pago */
 export const MODELS = ['google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash'];
@@ -63,6 +63,7 @@ export function openRouterChat(apiKey: string, post: Post = fetchPost, models = 
         if (r.status >= 200 && r.status < 300 && content) {
           const u = j?.usage;
           const costUsd = typeof u?.cost === 'number' ? u.cost : estimateUsd(model, u?.prompt_tokens ?? 0, u?.completion_tokens ?? 0);
+          recordAi(costUsd, opts.label ?? 'texto');
           return { content, model: j?.model ?? model, costUsd };
         }
         errors.push(`${model}: ${j?.error?.message ?? `HTTP ${r.status}`}`);
@@ -96,7 +97,11 @@ export function googleChat(apiKey: string, post: Post = fetchPost): Chat {
         if (r.status === 400 && /API key/i.test(j?.error?.message ?? '')) throw new Error('chave do Google inválida');
         if (r.status === 403) throw new Error('chave do Google sem permissão para o Gemini (ative a API ou o faturamento)');
         const content = j?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim();
-        if (r.status >= 200 && r.status < 300 && content) return { content, model: `google/${model}`, costUsd: estimateUsd(model, j?.usageMetadata?.promptTokenCount ?? 0, j?.usageMetadata?.candidatesTokenCount ?? 0) };
+        if (r.status >= 200 && r.status < 300 && content) {
+          const costUsd = estimateUsd(model, j?.usageMetadata?.promptTokenCount ?? 0, j?.usageMetadata?.candidatesTokenCount ?? 0);
+          recordAi(costUsd, opts.label ?? 'texto');
+          return { content, model: `google/${model}`, costUsd };
+        }
         errors.push(`${model}: ${j?.error?.message ?? `HTTP ${r.status}`}`);
       } catch (e) {
         if (/inválida|permissão/.test((e as Error).message)) throw e;

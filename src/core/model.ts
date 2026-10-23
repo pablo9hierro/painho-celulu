@@ -161,7 +161,8 @@ export const CaptionSchema = z.object({
   /** quem fala (1, 2, ...): cor diferente por pessoa */
   speaker: num.min(1).max(9),
   /** limpa = sem fundo · caixa = com fundo · destaque = palavra falada em destaque (karaokê) */
-  look: z.enum(['limpa', 'caixa', 'destaque']),
+  /** limpa = sem fundo; caixa = com fundo; destaque = sem fundo + palavra falada acesa; caixa-destaque = com fundo + palavra acesa */
+  look: z.enum(['limpa', 'caixa', 'destaque', 'caixa-destaque']),
   /** máximo de linhas (1, 2 ou 3): o texto diminui para caber */
   linhas: num.min(1).max(3).optional(),
 });

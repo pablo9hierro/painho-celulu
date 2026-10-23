@@ -16,7 +16,7 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
-export type Chat = (messages: ChatMessage[], opts?: { json?: boolean; maxTokens?: number }) => Promise<{ content: string; model: string; /** custo desta chamada em dólar */ costUsd?: number }>;
+export type Chat = (messages: ChatMessage[], opts?: { json?: boolean; maxTokens?: number; /** para o painel de gastos */ label?: string }) => Promise<{ content: string; model: string; /** custo desta chamada em dólar */ costUsd?: number }>;
 
 export interface StoryResult {
   text: string;

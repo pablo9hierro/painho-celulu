@@ -17,6 +17,7 @@ import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
 import { isBundledBrand, isSupersededBrand } from '../../platform/bundledBrand';
 import { CAPTION_PRESET, generateCaptions, restyleCaptions, type CaptionLook, type CaptionStyle } from '../captions';
+import { AiSpend } from '../AiSpend';
 
 /** arrastar para a timeline só com mouse; no toque, arrastar disparava inserção dupla */
 const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
@@ -274,7 +275,7 @@ function TextPanel() {
       <section className="preset-section">
         <h4>Molduras</h4>
         <div className="frame-grid">
-          {FRAMES.map((f) => (
+          {FRAMES.filter((f) => !f.hidden).map((f) => (
             <button
               key={f.id}
               className={`frame-card ${currentFrame === f.id ? 'on' : ''}`}
@@ -320,18 +321,31 @@ function TextPanel() {
   );
 }
 
-const LOOKS: { id: CaptionLook; label: string; hint: string }[] = [
-  { id: 'limpa', label: 'Sem fundo', hint: 'letra branca com contorno fino' },
-  { id: 'caixa', label: 'Com fundo', hint: 'faixa azul-escura atrás' },
-  { id: 'destaque', label: 'Palavra em destaque', hint: 'a palavra falada acende em azul' },
-];
+const lookOf = (fundo: boolean, palavra: boolean): CaptionLook => (fundo ? (palavra ? 'caixa-destaque' : 'caixa') : palavra ? 'destaque' : 'limpa');
+
+/** grupo de botões que quebra linha (nada fica por cima de nada) */
+function Choice<T extends string | number | boolean>({ label, value, options, onPick, testId }: { label: string; value: T; options: [T, string][]; onPick: (v: T) => void; testId: string }) {
+  return (
+    <div className="cap-row">
+      <span className="cap-label">{label}</span>
+      <div className="cap-opts">
+        {options.map(([v, l]) => (
+          <button key={String(v)} className={`btn sm ${value === v ? 'primary' : ''}`} onClick={() => onPick(v)} data-testid={`${testId}-${String(v)}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** Legendas automáticas: a IA ouve a fala, separa quem fala e cria as legendas. */
 function AutoCaptions() {
   const notify = useEditor((s) => s.notify);
   const count = useEditor((s) => s.project?.clips.filter((c) => c.type === 'text' && c.preset === CAPTION_PRESET).length ?? 0);
   const [st, setSt] = useState<CaptionStyle>({ look: 'destaque', upper: false, linhas: 2, align: 'center' });
-  const { look, upper } = st;
+  const fundo = st.look === 'caixa' || st.look === 'caixa-destaque';
+  const palavra = st.look === 'destaque' || st.look === 'caixa-destaque';
   const [step, setStep] = useState<string | null>(null);
   const run = async () => {
     setStep('Começando…');
@@ -348,47 +362,20 @@ function AutoCaptions() {
     setSt((cur) => ({ ...cur, ...patch }));
     if (count) restyleCaptions(patch);
   };
-  const pick = (l: CaptionLook) => set({ look: l });
   return (
-    <section className="preset-section" data-testid="auto-captions">
+    <section className="preset-section cap-panel" data-testid="auto-captions">
       <h4>Legendas automáticas</h4>
-      <p className="hint">A IA ouve a fala do vídeo e escreve as legendas no tempo certo. Se falar mais de uma pessoa, cada uma ganha uma cor.</p>
-      <div className="row-gap">
-        {LOOKS.map((l) => (
-          <button key={l.id} className={`btn ${look === l.id ? 'primary' : ''}`} title={l.hint} onClick={() => pick(l.id)} data-testid={`caption-look-${l.id}`}>
-            {l.label}
-          </button>
-        ))}
-      </div>
-      <label className="check small">
-        <input type="checkbox" checked={upper} onChange={(e) => set({ upper: e.target.checked })} data-testid="caption-upper" /> Tudo em maiúsculas
-      </label>
-      <div className="row-gap">
-        <span className="small muted">Linhas:</span>
-        {[1, 2, 3].map((n) => (
-          <button key={n} className={`btn sm ${st.linhas === n ? 'primary' : ''}`} onClick={() => set({ linhas: n })} data-testid={`caption-lines-${n}`}>
-            {n}
-          </button>
-        ))}
-      </div>
-      <div className="row-gap">
-        <span className="small muted">Posição:</span>
-        {(
-          [
-            ['left', 'Esquerda'],
-            ['center', 'Centro'],
-            ['right', 'Direita'],
-          ] as const
-        ).map(([a, label]) => (
-          <button key={a} className={`btn sm ${st.align === a ? 'primary' : ''}`} onClick={() => set({ align: a })} data-testid={`caption-align-${a}`}>
-            {label}
-          </button>
-        ))}
-      </div>
-      <button className="btn primary wide" disabled={!!step} onClick={() => void run()} data-testid="caption-generate">
+      <p className="hint">A IA ouve a fala do vídeo e escreve as legendas no tempo da fala. Se falar mais de uma pessoa, cada uma ganha uma cor.</p>
+      <Choice label="Fundo" value={fundo} options={[[false, 'Sem fundo'], [true, 'Com fundo']]} onPick={(v) => set({ look: lookOf(v, palavra) })} testId="caption-bg" />
+      <Choice label="Palavra falada" value={palavra} options={[[true, 'Acende em azul'], [false, 'Sem destaque']]} onPick={(v) => set({ look: lookOf(fundo, v) })} testId="caption-hl" />
+      <Choice label="Letras" value={st.upper} options={[[false, 'Normal'], [true, 'MAIÚSCULAS']]} onPick={(v) => set({ upper: v })} testId="caption-upper" />
+      <Choice label="Linhas" value={st.linhas} options={[[1, '1'], [2, '2'], [3, '3']]} onPick={(v) => set({ linhas: v })} testId="caption-lines" />
+      <Choice label="Posição" value={st.align} options={[['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita']]} onPick={(v) => set({ align: v })} testId="caption-align" />
+      <button className="btn primary wide cap-go" disabled={!!step} onClick={() => void run()} data-testid="caption-generate">
         {step ?? (count ? 'Gerar de novo (substitui as atuais)' : 'Gerar legendas da fala')}
       </button>
       {count > 0 && <p className="hint small" data-testid="caption-count">{count} legendas na trilha "Legendas". Toque numa para corrigir o texto; arraste ou estique a caixa no vídeo e todas acompanham.</p>}
+      <AiSpend compact />
     </section>
   );
 }

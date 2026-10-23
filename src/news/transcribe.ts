@@ -6,7 +6,7 @@
  * pessoas são mantidas entre pedaços passando a descrição de cada voz.
  */
 import { fetchPost, MODELS, providerOf, type Post } from './openrouter';
-import { estimateUsd } from './cost';
+import { estimateUsd, recordAi } from './cost';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const GOOGLE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -89,7 +89,9 @@ export async function transcribeWav(key: string, wavB64: string, dur: number, fa
       const j = r.json as { candidates?: { content?: { parts?: { text?: string }[] } }[]; error?: { message?: string }; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } } | null;
       const content = j?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
       if (r.status >= 200 && r.status < 300 && content) {
-        return { ...parseTranscricao(content, dur), costUsd: estimateUsd(model, j?.usageMetadata?.promptTokenCount ?? 0, j?.usageMetadata?.candidatesTokenCount ?? 0) };
+        const costUsd = estimateUsd(model, j?.usageMetadata?.promptTokenCount ?? 0, j?.usageMetadata?.candidatesTokenCount ?? 0);
+        recordAi(costUsd, 'legendas');
+        return { ...parseTranscricao(content, dur), costUsd };
       }
       errors.push(`${model}: ${j?.error?.message ?? `HTTP ${r.status}`}`);
     }
@@ -114,7 +116,9 @@ export async function transcribeWav(key: string, wavB64: string, dur: number, fa
     const content = j?.choices?.[0]?.message?.content ?? '';
     if (r.status >= 200 && r.status < 300 && content) {
       const u = j?.usage;
-      return { ...parseTranscricao(content, dur), costUsd: typeof u?.cost === 'number' ? u.cost : estimateUsd(model, u?.prompt_tokens ?? 0, u?.completion_tokens ?? 0) };
+      const costUsd = typeof u?.cost === 'number' ? u.cost : estimateUsd(model, u?.prompt_tokens ?? 0, u?.completion_tokens ?? 0);
+      recordAi(costUsd, 'legendas');
+      return { ...parseTranscricao(content, dur), costUsd };
     }
     errors.push(`${model}: ${j?.error?.message ?? `HTTP ${r.status}`}`);
   }
@@ -153,4 +157,157 @@ export function splitSegments(segs: Segmento[], max = 7): Segmento[] {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------- sincronia pela própria voz (sem IA)
+
+export interface Regiao {
+  ini: number;
+  fim: number;
+}
+
+/**
+ * Onde tem voz no áudio (detector de energia em janelas de 20 ms, com limiar que
+ * se adapta ao ruído/música de fundo). A IA erra o tempo em até 1-2 s; a voz não.
+ */
+export function speechRegions(pcm: Float32Array, rate: number, offset = 0): Regiao[] {
+  const win = Math.max(1, Math.round(rate * 0.02));
+  const n = Math.floor(pcm.length / win);
+  if (!n) return [];
+  const e = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let j = i * win; j < (i + 1) * win; j++) s += pcm[j]! * pcm[j]!;
+    e[i] = Math.sqrt(s / win);
+  }
+  const sorted = [...e].sort((a, b) => a - b);
+  const floor = sorted[Math.floor(n * 0.2)] ?? 0;
+  const loud = sorted[Math.floor(n * 0.95)] ?? 0;
+  const th = Math.max(0.004, floor + (loud - floor) * 0.18);
+  const out: Regiao[] = [];
+  let start = -1;
+  let quiet = 0;
+  for (let i = 0; i < n; i++) {
+    if (e[i]! >= th) {
+      if (start < 0) start = i;
+      quiet = 0;
+    } else if (start >= 0 && ++quiet > 12) {
+      // 240 ms de silêncio fecha o trecho
+      out.push({ ini: start, fim: i - quiet + 1 });
+      start = -1;
+      quiet = 0;
+    }
+  }
+  if (start >= 0) out.push({ ini: start, fim: n - quiet });
+  const t = win / rate;
+  return out.filter((r) => (r.fim - r.ini) * t >= 0.12).map((r) => ({ ini: offset + r.ini * t, fim: offset + r.fim * t }));
+}
+
+const median = (v: number[]) => {
+  const s = [...v].sort((a, b) => a - b);
+  return s.length ? s[Math.floor(s.length / 2)]! : 0;
+};
+
+/**
+ * Encosta as frases da IA na voz de verdade. A IA acerta a ORDEM e o texto, mas
+ * erra o tempo; o detector acerta o tempo da voz. Cada frase recebe um bloco de
+ * trechos de voz seguidos (fronteiras sempre numa pausa), escolhendo a divisão
+ * que melhor combina o tempo da IA com o tamanho de cada frase.
+ */
+export function alignSegments(segs: Segmento[], allRegs: Regiao[]): Segmento[] {
+  const n = segs.length;
+  if (!n || !allRegs.length) return segs;
+  const regs = allRegs.filter((r) => r.fim >= segs[0]!.inicio - 2.5 && r.ini <= segs[n - 1]!.fim + 2.5);
+  const R = regs.length;
+  if (R < n) return shiftOnly(segs, regs);
+  const chars = segs.map((s) => Math.max(2, s.texto.replace(/\s+/g, '').length));
+  const voicedAll = regs.reduce((s, r) => s + r.fim - r.ini, 0);
+  const spc = voicedAll / chars.reduce((a, b) => a + b, 0);
+  const pre = [0];
+  for (const r of regs) pre.push(pre[pre.length - 1]! + r.fim - r.ini);
+  const voiced = (i: number, j: number) => pre[j + 1]! - pre[i]!; // trechos i..j
+  // custo da frase k ocupar os trechos i..j
+  const cost = (k: number, i: number, j: number) => Math.abs(regs[i]!.ini - segs[k]!.inicio) * 0.6 + Math.abs(regs[j]!.fim - segs[k]!.fim) * 0.6 + Math.abs(voiced(i, j) - chars[k]! * spc);
+  // dp[k][j] = menor custo com as frases 0..k terminando no trecho j (frases podem pular trechos de ruído entre elas)
+  const INF = 1e9;
+  const dp = Array.from({ length: n }, () => new Float64Array(R).fill(INF));
+  const from = Array.from({ length: n }, () => new Int32Array(R).fill(-1));
+  const startOf = Array.from({ length: n }, () => new Int32Array(R).fill(-1));
+  for (let j = 0; j < R; j++)
+    for (let i = 0; i <= j; i++) {
+      const c = cost(0, i, j) + i * 0.3;
+      if (c < dp[0]![j]!) {
+        dp[0]![j] = c;
+        startOf[0]![j] = i;
+      }
+    }
+  for (let k = 1; k < n; k++)
+    for (let j = k; j < R; j++)
+      for (let i = k; i <= j; i++) {
+        let bestPrev = INF;
+        let arg = -1;
+        for (let p = k - 1; p < i; p++) {
+          const v = dp[k - 1]![p]! + (i - p - 1) * 0.3; // trechos pulados (ruído) custam um pouco
+          if (v < bestPrev) {
+            bestPrev = v;
+            arg = p;
+          }
+        }
+        const c = bestPrev + cost(k, i, j);
+        if (c < dp[k]![j]!) {
+          dp[k]![j] = c;
+          from[k]![j] = arg;
+          startOf[k]![j] = i;
+        }
+      }
+  let j = 0;
+  for (let x = 0; x < R; x++) if (dp[n - 1]![x]! + (R - 1 - x) * 0.3 < dp[n - 1]![j]! + (R - 1 - j) * 0.3) j = x;
+  const out: Segmento[] = new Array(n);
+  for (let k = n - 1; k >= 0; k--) {
+    const i = startOf[k]![j]!;
+    out[k] = { ...segs[k]!, inicio: Math.round(regs[i]!.ini * 100) / 100, fim: Math.round(regs[j]!.fim * 100) / 100 };
+    j = from[k]![j]!;
+  }
+  return out;
+}
+
+/** poucos trechos de voz (fala sem pausas): só corrige o atraso geral */
+function shiftOnly(segs: Segmento[], regs: Regiao[]): Segmento[] {
+  const onsets = regs.map((r) => r.ini);
+  const deltas = segs
+    .map((s) => {
+      let best: number | null = null;
+      for (const x of onsets) if (Math.abs(x - s.inicio) <= 2 && (best === null || Math.abs(x - s.inicio) < Math.abs(best - s.inicio))) best = x;
+      return best === null ? null : best - s.inicio;
+    })
+    .filter((d): d is number => d !== null);
+  const shift = deltas.length ? median(deltas) : 0;
+  return segs.map((s) => ({ ...s, inicio: Math.max(0, s.inicio + shift), fim: Math.max(0.3, s.fim + shift) }));
+}
+
+/** tempo de cada palavra só nos trechos COM voz da frase (karaokê rente à fala). Tempos relativos ao início. */
+export function wordTimesVoiced(texto: string, ini: number, fim: number, regs: Regiao[]): { w: string; t: number }[] {
+  const parts = regs.map((r) => ({ a: Math.max(ini, r.ini), b: Math.min(fim, r.fim) })).filter((r) => r.b - r.a > 0.05);
+  const voiced = parts.reduce((s, r) => s + r.b - r.a, 0);
+  if (voiced < (fim - ini) * 0.3) return wordTimes(texto, (fim - ini) * 0.92);
+  const words = texto.split(/\s+/).filter(Boolean);
+  const weight = words.map((w) => 1 + w.replace(/[^\p{L}\p{N}]/gu, '').length);
+  const total = weight.reduce((a, b) => a + b, 0) || 1;
+  let acc = 0;
+  return words.map((w, i) => {
+    // posição no tempo "falado" → tempo real
+    let v = (acc / total) * voiced;
+    acc += weight[i]!;
+    let t = parts[0]!.a;
+    for (const r of parts) {
+      const len = r.b - r.a;
+      if (v <= len) {
+        t = r.a + v;
+        break;
+      }
+      v -= len;
+      t = r.b;
+    }
+    return { w, t: Math.round((t - ini) * 100) / 100 };
+  });
 }

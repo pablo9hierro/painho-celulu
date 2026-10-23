@@ -59,3 +59,27 @@ describe('legendas automáticas', () => {
     expect(r.costUsd).toBe(0.0002);
   });
 });
+
+describe('sincronia pela voz', () => {
+  it('acha os trechos de voz e encosta cada frase no seu trecho (IA atrasada)', async () => {
+    const { speechRegions, alignSegments } = await import('./transcribe');
+    const rate = 16000;
+    const pcm = new Float32Array(rate * 10);
+    // voz em 0.5-1.4 s, 2.0-4.0 s e 5.0-8.0 s
+    for (const [a, b] of [[0.5, 1.4], [2, 4], [5, 8]] as const) for (let i = a * rate; i < b * rate; i++) pcm[i] = 0.3 * Math.sin(i / 7);
+    const regs = speechRegions(pcm, rate);
+    expect(regs).toHaveLength(3);
+    expect(regs[0]!.ini).toBeCloseTo(0.5, 1);
+    expect(regs[2]!.fim).toBeCloseTo(8, 1);
+    const al = alignSegments(
+      [
+        { falante: 1, inicio: 0.4, fim: 2.6, texto: 'Bom dia.' },
+        { falante: 1, inicio: 2.6, fim: 4.9, texto: 'Aqui é o Primeiras Notícias.' },
+        { falante: 2, inicio: 5.9, fim: 9.0, texto: 'Hoje vamos falar sobre o trânsito em João Pessoa.' },
+      ],
+      regs,
+    );
+    const r2 = (x: number) => Math.round(x * 100) / 100;
+    expect(al.map((s) => [s.inicio, s.fim])).toEqual(regs.map((r) => [r2(r.ini), r2(r.fim)]));
+  });
+});

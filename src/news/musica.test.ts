@@ -74,3 +74,12 @@ describe('música do post e collab', () => {
     expect(sent.filter((b) => b.media_type === 'REELS').at(-1)!.collaborators).toBeUndefined();
   }, 60_000);
 });
+
+describe('intervalo entre Reels automáticos', () => {
+  it('sorteia entre 3 e 5 minutos', async () => {
+    const { igGapMs } = await import('./autopostApp');
+    expect(igGapMs(0)).toBe(180_000);
+    expect(igGapMs(1)).toBe(300_000);
+    expect(igGapMs(0.5)).toBe(240_000);
+  });
+});

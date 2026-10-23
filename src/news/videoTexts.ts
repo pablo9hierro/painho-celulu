@@ -66,7 +66,7 @@ Não invente nada que não esteja na matéria. Escolha o tom pelo assunto real (
         },
         { role: 'user', content: `TÍTULO DO SITE: ${m.titulo}\nSUBTÍTULO DO SITE: ${m.subtitulo}\nPALAVRAS-CHAVE: ${m.palavras.join(', ')}\n\n${m.texto.slice(0, 3000)}` },
       ],
-      { json: true, maxTokens: 400 },
+      { json: true, maxTokens: 400, label: 'post em vídeo' },
     );
     const j = JSON.parse(/\{[\s\S]*\}/.exec(r.content)?.[0] ?? '{}') as Partial<Record<keyof VideoTexts, string>>;
     const fb = fallback();

@@ -49,7 +49,8 @@ test('legendas automáticas: transcreve a fala, separa quem fala e muda o estilo
   let list = p.clips.filter((c) => c.preset === 'pn-legenda');
   expect(list.map((c) => c.caption!.speaker)).toEqual([1, 2]);
   expect(p.tracks.find((t) => t.id === list[0]!.trackId)!.name).toBe('Legendas');
-  expect(list[0]!.start).toBeCloseTo(0.2, 1);
+  // encostada no começo da voz (o tom de teste começa em 0 s)
+  expect(list[0]!.start).toBeLessThan(0.3);
   expect(list[0]!.caption!.look).toBe('destaque');
   // estilos: sem fundo / com fundo / destaque e maiúsculas opcionais
   const shoot = async (tag: string, t: number) => {
@@ -61,10 +62,11 @@ test('legendas automáticas: transcreve a fala, separa quem fala e muda o estilo
   };
   await shoot('destaque', 1.4);
   await shoot('destaque-2', 4.2);
-  await page.getByTestId('caption-look-caixa').click();
+  await page.getByTestId('caption-bg-true').click(); // com fundo + palavra acesa
   await shoot('caixa', 1.4);
-  await page.getByTestId('caption-look-limpa').click();
-  await page.getByTestId('caption-upper').check();
+  await page.getByTestId('caption-bg-false').click();
+  await page.getByTestId('caption-hl-false').click();
+  await page.getByTestId('caption-upper-true').click();
   await shoot('limpa-maiusculas', 4.2);
   // 1 linha, à esquerda
   await page.getByTestId('caption-lines-1').click();

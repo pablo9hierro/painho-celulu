@@ -9,8 +9,8 @@
  * - a trilha do tom da matéria, se houver.
  * O app abre o projeto no editor; a automação renderiza o mesmo projeto.
  */
-import type { FormatId, MediaAsset, Project } from '../core/model';
-import { createAudioClip, createBlurClip, createImageClip, createProject, createTextClip, fitContain } from '../core/factory';
+import type { FormatId, MediaAsset, Project, VisualClip } from '../core/model';
+import { createAudioClip, createBlurClip, createImageClip, createVideoClip, createProject, createTextClip, fitContain } from '../core/factory';
 import { coverWindow, frameWindow, getFrame, insertFrame } from '../core/frames';
 import { placeClip } from '../core/timeline';
 import { media as mediaApi, projects } from '../platform/api';
@@ -18,7 +18,7 @@ import { markKeyword } from '../render/edicao';
 import { waitReady } from './importer';
 import { ensureTrackMedia } from '../news/defaultTones';
 
-export const STORY_FRAME = 'central';
+export const STORY_FRAME = 'reels-post';
 export const STORY_SECONDS = 15;
 
 export interface StoryVideoInput {
@@ -29,6 +29,8 @@ export interface StoryVideoInput {
   keywords?: string[];
   /** foto da matéria (arquivo já baixado); sem foto, a janela fica com o fundo da moldura */
   photo?: File | null;
+  /** vídeo da matéria (baixado): entra no lugar da foto, sem o som original */
+  video?: File | null;
   format?: FormatId;
   /** segundos */
   duration?: number;
@@ -41,12 +43,15 @@ export interface StoryVideoInput {
 
 /** Monta o projeto (sem enviar nada): usado pelo app e pela automação. */
 export function buildStoryProject(
-  input: Omit<StoryVideoInput, 'photo' | 'audioId'>,
-  photo: Pick<MediaAsset, 'id' | 'name' | 'width' | 'height'> | null,
+  input: Omit<StoryVideoInput, 'photo' | 'video' | 'audioId'>,
+  photo: Pick<MediaAsset, 'id' | 'name' | 'width' | 'height'> | MediaAsset | null,
   audio: MediaAsset | null,
 ): Project {
   const format = input.format ?? 'reel';
-  const duration = Math.max(5, Math.min(20, input.duration ?? (audio ? input.audioDur : undefined) ?? STORY_SECONDS));
+  let duration = Math.max(5, Math.min(20, input.duration ?? (audio ? input.audioDur : undefined) ?? STORY_SECONDS));
+  // vídeo da matéria no lugar da foto: o post não passa do fim do vídeo
+  const isVideo = (photo as MediaAsset | null)?.kind === 'video';
+  if (isVideo) duration = Math.max(5, Math.min(duration, (photo as MediaAsset).duration || duration));
   const title = markKeyword(input.title.trim(), input.keywords ?? []);
   const name = title.replace(/\*/g, '').slice(0, 60) || `Post ${new Date().toLocaleDateString('pt-BR')}`;
   let p = createProject(name, format);
@@ -54,7 +59,9 @@ export function buildStoryProject(
   const visual = p.tracks.find((t) => t.kind === 'visual');
   if (photo) {
     const m = photo as MediaAsset;
-    const img = createImageClip(p, m, 0);
+    // foto ou vídeo (o som do vídeo fica mudo: só a trilha, baixinha)
+    const mk = (): VisualClip => (isVideo ? { ...createVideoClip(p, m, 0), volume: 0, muted: true } : createImageClip(p, m, 0));
+    const img = mk();
     const ratio = (m.width || 16) / (m.height || 9);
     // cobre a janela da moldura; o que sobra fica escondido atrás do fundo da moldura
     const start = coverWindow(def, p.width, p.height, ratio);
@@ -74,7 +81,7 @@ export function buildStoryProject(
       blur.duration = duration;
       blur.intensity = 75;
       p = placeClip(p, blur);
-      const whole = createImageClip(p, m, 0);
+      const whole = mk();
       const fit = fitContain(m.width || 16, m.height || 9, win.w, win.h);
       whole.transform = { ...fit, x: win.x + win.w / 2, y: win.y + win.h / 2 };
       whole.duration = duration;
@@ -89,8 +96,10 @@ export function buildStoryProject(
   text.fields = { kicker: input.kicker.trim(), title, subtitle: input.subtitle.trim() };
   // placa logo abaixo da janela da foto, até antes do @perfil da moldura
   const top = (def.window.y + def.window.h) * p.height + p.height * 0.008;
-  const bottom = p.height * 0.935;
-  text.transform = { ...text.transform, x: p.width / 2, y: (top + bottom) / 2, width: p.width, height: bottom - top };
+  // termina antes da área do nome/legenda do Instagram (e dentro da miniatura 3:4)
+  const bottom = p.height * 0.75;
+  // à direita ficam os botões do Instagram (curtir, comentar...): o texto não vai até lá
+  text.transform = { ...text.transform, x: p.width * 0.445, y: (top + bottom) / 2, width: p.width * 0.89, height: bottom - top };
   p = placeClip(p, text);
   // trilha do tom: cortada no tamanho do post, entrando e saindo suave
   if (audio && audio.status === 'ready') {
@@ -101,7 +110,7 @@ export function buildStoryProject(
     clip.duration = Math.min(duration, Math.max(0.1, total - clip.sourceIn));
     clip.fadeIn = 0.3;
     clip.fadeOut = Math.min(1.2, clip.duration / 3);
-    clip.volume = 0.85;
+    clip.volume = isVideo ? 0.35 : 0.85;
     clip.name = `Trilha · ${audio.name}`;
     p = placeClip(p, clip);
   }
@@ -111,7 +120,16 @@ export function buildStoryProject(
 /** App: envia a foto para a biblioteca, monta o projeto e salva. Devolve o id. */
 export async function createStoryVideo(input: StoryVideoInput): Promise<string> {
   let photo: MediaAsset | null = null;
-  if (input.photo) {
+  if (input.video) {
+    try {
+      const up = await mediaApi.upload(input.video);
+      const v = await waitReady(up.id);
+      if (v.status === 'ready' && v.duration >= 3) photo = v;
+    } catch {
+      /* vídeo não abriu: segue com a foto */
+    }
+  }
+  if (!photo && input.photo) {
     const up = await mediaApi.upload(input.photo);
     photo = await waitReady(up.id);
     if (photo.status !== 'ready') throw new Error(photo.error ?? 'Não foi possível processar a foto.');

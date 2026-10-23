@@ -112,6 +112,11 @@ export function ProjectsScreen() {
           <strong>Baixar vídeo</strong>
           <span>Cole o link do Reels e já edite</span>
         </button>
+        <button className="hub-card" onClick={() => newRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid="hub-edit">
+          <IconMedia />
+          <strong>Editar vídeo</strong>
+          <span>Novo projeto ou continue um recente</span>
+        </button>
         <button className="hub-card" onClick={() => setPostador(true)} data-testid="hub-postador">
           <IconSend />
           <strong>Postador de notícias</strong>
@@ -126,11 +131,6 @@ export function ProjectsScreen() {
           <IconNews />
           <strong>Buscar e criar matéria</strong>
           <span>Pesquise a notícia e gere a legenda do Reels</span>
-        </button>
-        <button className="hub-card" onClick={() => newRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid="hub-edit">
-          <IconMedia />
-          <strong>Editar vídeo</strong>
-          <span>Novo projeto ou continue um recente</span>
         </button>
       </section>
       {dl && <DownloadDialog onClose={() => setDl(false)} />}

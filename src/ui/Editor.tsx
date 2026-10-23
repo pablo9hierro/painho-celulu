@@ -29,7 +29,6 @@ import { useBackHandler } from '../platform/backButton';
 import { applyFrameLogos } from './frameLogos';
 import { clearBackup, readBackup, writeBackup } from './projectBackup';
 import {
-  IconNews,
   IconAudio,
   IconBack,
   IconBlur,
@@ -328,9 +327,6 @@ export function Editor({ projectId }: { projectId: string }) {
         </button>
         <button className="icon-btn" disabled={!canRedo} onClick={() => getEditor().redo()} title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer">
           <IconRedo />
-        </button>
-        <button className="btn" onClick={() => setPost({})} data-testid="open-post" aria-label="Matéria" data-tip="Buscar a notícia e escrever a matéria do Instagram">
-          <IconNews /> <span className="hide-sm">Matéria</span>
         </button>
         <button className="btn primary" onClick={() => setExportOpen(true)} data-testid="open-export" data-tip="Exportar o vídeo final em MP4 para o aparelho">
           <IconExport /> <span className="hide-sm">Exportar</span>
