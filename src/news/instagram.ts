@@ -167,3 +167,9 @@ export async function onlineFollowers(http: IgHttp, c: IgConfig): Promise<number
 export async function refreshToken(http: IgHttp, token: string, appId: string, appSecret: string): Promise<{ access_token: string; expires_in?: number }> {
   return check(await http.get(`${IG_API}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(token)}`));
 }
+
+/** Publica um comentário no post (ex.: a descrição de novo). Fixar o comentário não existe na API. */
+export async function postComment(http: IgHttp, c: IgConfig, mediaId: string, message: string): Promise<string> {
+  const j = check<{ id: string }>(await http.post(`${base(c)}/${mediaId}/comments`, { message: message.slice(0, 2200), access_token: c.token }));
+  return j.id;
+}

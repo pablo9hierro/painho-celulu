@@ -19,6 +19,7 @@ import { clipEnd, deleteClips, findClip, projectDuration, setSpeed, splitClip } 
 import { createBlurClip, createTextClip } from '../core/factory';
 import { placeClip } from '../core/timeline';
 import { effectiveTransform, updateClip } from '../core/edit';
+import { alignSegments, wordTimesVoiced, type Regiao, type Segmento } from './transcribe';
 import type { VisualClip } from '../core/model';
 
 const ActionSchema = z.discriminatedUnion('tipo', [
@@ -54,12 +55,18 @@ export interface EditContext {
   /** onde está a agulha (o "aqui"/"nesse momento" do comando) */
   agulha: number;
   clips: { id: string; tipo: string; nome: string; inicio: number; duracao: number }[];
-  /** frase, tempo e quem fala (se já houver legendas geradas) */
-  falas: { inicio: number; fim: number; falante: number; texto: string }[];
+  /** frase, tempo e quem fala; com a transcrição automática, também o tempo de cada palavra */
+  falas: { inicio: number; fim: number; falante: number; texto: string; palavras?: [string, number, number][] }[];
+}
+
+/** transcrição do áudio do projeto (frases + trechos com voz), feita na hora se não houver legendas */
+export interface TranscriptInput {
+  segs: Segmento[];
+  regs: Regiao[];
 }
 
 /** `agulha`: posição atual do play head (em segundos) — é o que "aqui"/"nesse momento" do comando quer dizer. */
-export function buildContext(p: Project, agulha = 0): EditContext {
+export function buildContext(p: Project, agulha = 0, tr?: TranscriptInput): EditContext {
   const clips = p.clips
     .filter((c) => c.type !== 'frame')
     .map((c) => ({ id: c.id, tipo: c.type, nome: c.name, inicio: Math.round(c.start * 10) / 10, duracao: Math.round(c.duration * 10) / 10 }))
@@ -68,7 +75,18 @@ export function buildContext(p: Project, agulha = 0): EditContext {
     .filter((c): c is Extract<Clip, { type: 'text' }> => c.type === 'text' && c.preset === 'pn-legenda')
     .map((c) => ({ inicio: Math.round(c.start * 10) / 10, fim: Math.round((c.start + c.duration) * 10) / 10, falante: c.caption?.speaker ?? 1, texto: c.fields.title }))
     .sort((a, b) => a.inicio - b.inicio);
-  return { duration: Math.round(projectDuration(p) * 10) / 10, agulha: Math.round(agulha * 10) / 10, clips, falas };
+  // sem legendas na timeline: usa a transcrição automática, com o tempo de cada palavra (para cortar no lugar exato)
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  const fromTr = tr
+    ? alignSegments(tr.segs, tr.regs).map((s) => ({
+        inicio: r1(s.inicio),
+        fim: r1(s.fim),
+        falante: s.falante,
+        texto: s.texto,
+        palavras: ((ws) => ws.map((w, i) => [w.w, r1(s.inicio + w.t), r1(i + 1 < ws.length ? s.inicio + ws[i + 1]!.t : s.fim)] as [string, number, number]))(wordTimesVoiced(s.texto, s.inicio, s.fim, tr.regs)),
+      }))
+    : [];
+  return { duration: r1(projectDuration(p)), agulha: r1(agulha), clips, falas: falas.length ? falas : fromTr };
 }
 
 const PRESET_LIST = HEADLINE_PRESETS.filter((p) => !p.hidden && p.category !== 'encerramento').map((p) => `${p.id} (${p.name}: ${p.description})`);
@@ -86,7 +104,10 @@ function prompt(ctx: EditContext): string {
     `Manchetes disponíveis: ${PRESET_LIST.join(' | ')}`,
     `O vídeo dura ${ctx.duration}s. Itens na timeline (id, tipo, nome, início, duração): ${JSON.stringify(ctx.clips)}`,
     `A agulha (onde o jornalista está olhando agora) está em ${ctx.agulha}s. Quando o comando disser "aqui", "nesse momento", "onde está a agulha" ou não disser quando, use ${ctx.agulha}s como início.`,
-    ctx.falas.length ? `O que é falado, com o tempo exato (use para entender "quando ele fala X"): ${JSON.stringify(ctx.falas)}` : 'Ainda não há transcrição da fala neste projeto: para comandos que dependam do que é falado, avise no "aviso".',
+    ctx.falas.length
+      ? `O que é falado, com o tempo exato de cada frase e, em "palavras", cada palavra como [palavra, início, fim] em segundos: ${JSON.stringify(ctx.falas)}. Para "corta quando ele fala X", ache X no texto e use do INÍCIO da primeira palavra de X até o FIM da última palavra de X. Se X não estiver no que é falado, não corte: diga no "aviso" que não achou essa fala.`
+      : 'Não há fala neste vídeo (ou não deu para transcrever): para comandos que dependam do que é falado, NÃO corte nada — diga no "aviso".',
+    'Nunca chute tempo: todo início/fim tem que vir do comando (segundos ditos), da agulha ou das falas acima.',
     'IMPORTANTE: você não vê a imagem do vídeo (não sabe se tem logo de outro canal, nem onde exatamente ela está na tela). Para cobrir algo visual (logo, manchete de outro canal, rosto), use EXATAMENTE o tempo e o canto/área que o jornalista disse. Se ele não disser onde ou quando, pergunte no "aviso" em vez de chutar.',
     'Quando o jornalista DITAR o texto da manchete (ex.: "bota a manchete escrito urgente, suspeito foi preso"), use EXATAMENTE essas palavras no "texto" — não resuma nem reescreva. Só escreva um texto por conta própria se ele pedir isso explicitamente (ex.: "escreve uma manchete curta sobre isso").',
     'Nunca invente um clipId que não está na lista. Se o pedido não fizer sentido com o que existe, devolva "acoes":[] e explique em "aviso".',

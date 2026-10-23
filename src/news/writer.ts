@@ -40,6 +40,7 @@ REGRAS OBRIGATÓRIAS
 1. Use SOMENTE informações que estão nas FONTES. Não invente nem deduza nomes, idades, números, horários, datas, locais, causas, motivações, citações ou desdobramentos. Se não estiver nas fontes, não escreva.
 2. Traga o máximo de detalhes concretos das fontes: o que aconteceu, quem, quando, onde, como, números, órgãos e autoridades envolvidos, e falas entre aspas apenas se estiverem nas fontes.
 3. A primeira frase do corpo já conta o fato principal. Sem introdução, sem contexto genérico, sem opinião, sem conclusão, sem "moral da história".
+8. CADA PARÁGRAFO TRAZ INFORMAÇÃO NOVA: nunca repita o fato principal com outras palavras (ex.: abrir com "PM salva homem que caiu do prédio" e no 2º parágrafo dizer de novo "o homem caiu e o PM salvou" é PROIBIDO). Depois do primeiro parágrafo, siga com os DETALHES que estão nas fontes, nesta ordem, só o que existir: como aconteceu passo a passo (horário, local exato, rua, bairro), quem são os envolvidos (nome, idade, profissão, cargo), o que disseram (falas entre aspas, atribuídas), o que a polícia/órgão fez (prisão, delegacia, perícia, hospital, estado de saúde), números, antecedentes/contexto citado nas fontes e o que acontece a seguir. Use TODOS os dados concretos das fontes; se as fontes forem várias, junte os detalhes de todas. Texto jornalístico, fluido, sem ser seco: frases ligadas com sentido, não uma lista de frases soltas.
 4. Frases curtas, voz ativa, parágrafos de 1 a 3 frases.
 5. PROIBIDO: conselhos ou recomendações ao leitor (só se forem fala de autoridade presente nas fontes, entre aspas e atribuída), travessão (—), emojis, ponto de exclamação, perguntas retóricas e estas expressões: "vale ressaltar", "vale destacar", "é importante destacar", "é importante ressaltar", "em meio a", "chocou a comunidade", "trágico", "cenário", "crucial", "fundamental", "não apenas", "mas também", "em suma", "em resumo", "confira", "fique ligado", "desdobramentos ainda são aguardados".
 6. Se as fontes divergirem num dado, atribua cada versão ao veículo ("segundo o [veículo]"), sem misturar números de fontes diferentes.
@@ -167,6 +168,37 @@ export function slopIssues(text: string): string[] {
   };
   many(/\balém disso\b/gi, 1, '"além disso" repetido');
   many(/\bno entanto\b/gi, 1, '"no entanto" repetido');
+  const rep = repeatedParagraphs(text.split(/\n+/).filter((l) => l.trim() && !/^\s*#/.test(l)));
+  if (rep.length) out.push(`parágrafo ${rep.map((r) => r + 1).join(', ')} repete o que já foi dito (traga um detalhe novo das fontes no lugar)`);
+  return out;
+}
+
+/** palavras com conteúdo (4+ letras, sem as comuns) */
+function contentWords(s: string): Set<string> {
+  const fold = s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return new Set(fold.split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !COMMON.has(w)));
+}
+const COMMON = new Set(['para', 'pela', 'pelo', 'como', 'mais', 'esta', 'este', 'essa', 'esse', 'isso', 'onde', 'quando', 'sobre', 'entre', 'ainda', 'tambem', 'foram', 'sido', 'segundo', 'apos', 'durante', 'contra', 'desde', 'mesmo', 'muito', 'pode', 'ser', 'havia', 'teve', 'seus', 'suas', 'dele', 'dela']);
+
+/**
+ * Parágrafos que repetem um anterior (a mesma informação com outras palavras):
+ * a maior parte das palavras com conteúdo já apareceu num parágrafo anterior.
+ */
+export function repeatedParagraphs(paragraphs: string[]): number[] {
+  const sets = paragraphs.map(contentWords);
+  const out: number[] = [];
+  for (let i = 1; i < sets.length; i++) {
+    const cur = sets[i]!;
+    if (cur.size < 4) continue;
+    for (let j = 0; j < i; j++) {
+      let shared = 0;
+      for (const w of cur) if (sets[j]!.has(w)) shared++;
+      if (shared >= 4 && shared / cur.size >= 0.6) {
+        out.push(i);
+        break;
+      }
+    }
+  }
   return out;
 }
 

@@ -42,3 +42,17 @@ describe('textos do post em vídeo', () => {
     expect(hasAacAudio(enc.encode('....moov....trak..stsd..avc1....'))).toBe(false);
   });
 });
+
+describe('matéria sem repetição', () => {
+  it('acha o parágrafo que só repete o anterior com outras palavras', async () => {
+    const { repeatedParagraphs } = await import('./writer');
+    expect(
+      repeatedParagraphs([
+        'Um policial militar salvou um homem que caiu do terceiro andar de um prédio no bairro Manaíra, em João Pessoa.',
+        'O homem caiu do prédio no bairro Manaíra e foi salvo pelo policial militar em João Pessoa.',
+        'Segundo a PM, o sargento Carlos Lima segurou a vítima pelo braço às 14h e chamou o Samu.',
+      ]),
+    ).toEqual([1]);
+    expect(repeatedParagraphs(['Fato principal com detalhes únicos aqui.', 'Outro dado totalmente diferente sobre horário e local.'])).toEqual([]);
+  });
+});

@@ -5,7 +5,10 @@
  * ir para a edição — nada corrompido entra no projeto.
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { downloadVideo, DownloadError, looksLikeVideo, type DlHttp } from './reelDownload';
+import { downloadVideo, DownloadError, instagramCode, looksLikeVideo, type DlHttp } from './reelDownload';
+import { linkPorSites } from '../platform/extrator';
+
+const UA_MOBILE = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Mobile Safari/537.36';
 import { indexMp4 } from '../engine/mp4index';
 
 const native = Capacitor.isNativePlatform();
@@ -98,18 +101,42 @@ async function verify(file: File): Promise<void> {
   throw new LinkDownloadError('O vídeo baixado está corrompido ou incompleto. Tente baixar de novo.', []);
 }
 
-export async function downloadFromLink(link: string): Promise<Downloaded> {
+/** onStep: o que está tentando agora (para mostrar na tela) */
+export async function downloadFromLink(link: string, onStep?: (s: string) => void): Promise<Downloaded> {
   let file: File;
   let via = '';
   let steps: string[] = [];
   if (native) {
-    try {
-      const r = await downloadVideo(link, nativeDl);
-      file = new File([r.bytes as BlobPart], r.fileName, { type: 'video/mp4' });
-      via = r.via;
-      steps = r.steps;
-    } catch (e) {
-      throw new LinkDownloadError((e as Error).message, e instanceof DownloadError ? e.steps : []);
+    const code = instagramCode(link);
+    // 1º: sites tipo SnapInsta num navegador escondido (o mesmo que funciona no navegador do celular)
+    let viaSite: File | null = null;
+    if (code) {
+      try {
+        const { link: arquivo, site } = await linkPorSites(link.trim(), steps, onStep);
+        const bin = await nativeDl.binary(arquivo, { 'User-Agent': UA_MOBILE, Referer: `https://${site.replace(/^https?:\/\//, '')}` });
+        if (bin.status < 400 && looksLikeVideo(bin.bytes)) {
+          viaSite = new File([bin.bytes as BlobPart], `reels-${code}.mp4`, { type: 'video/mp4' });
+          via = new URL(site).hostname;
+        } else steps.push(`arquivo do site: HTTP ${bin.status}, ${bin.bytes.length} bytes`);
+      } catch (e) {
+        steps.push(`sites de download: ${(e as Error).message}`);
+      }
+    }
+    if (viaSite) file = viaSite;
+    else {
+      // 2º: os caminhos diretos do Instagram (página, consulta pública, incorporação)
+      onStep?.('Tentando direto no Instagram…');
+      try {
+        const r = await downloadVideo(link, nativeDl);
+        file = new File([r.bytes as BlobPart], r.fileName, { type: 'video/mp4' });
+        via = r.via;
+        steps = [...steps, ...r.steps];
+      } catch (e) {
+        throw new LinkDownloadError(
+          code ? 'Não consegui baixar nem pelos sites de download (fastdl, sssinstagram, igram) nem direto do Instagram. Confira se o post é público e tente de novo em alguns minutos.' : (e as Error).message,
+          [...steps, ...(e instanceof DownloadError ? e.steps : [])],
+        );
+      }
     }
   } else {
     let res: Response;

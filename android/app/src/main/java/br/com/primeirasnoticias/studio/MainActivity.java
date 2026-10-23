@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(KeepAlivePlugin.class);
         registerPlugin(PostadorPlugin.class);
         registerPlugin(DitadoPlugin.class);
+        registerPlugin(ExtratorPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Mesmo comportamento em qualquer Android (o 15 força "edge-to-edge"):

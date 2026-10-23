@@ -64,7 +64,7 @@ export function Editor({ projectId }: { projectId: string }) {
   const selectionCount = useEditor((s) => s.selection.length);
   const [error, setError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [post, setPost] = useState<{ videoFile?: string } | null>(null);
+  const [post, setPost] = useState<{ videoFile?: string; video?: Blob } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const saveTimer = useRef<number | null>(null);
@@ -363,13 +363,13 @@ export function Editor({ projectId }: { projectId: string }) {
       {exportOpen && (
         <ExportDialog
           onClose={() => setExportOpen(false)}
-          onPost={(videoFile) => {
+          onPost={(videoFile, video) => {
             setExportOpen(false);
-            setPost({ videoFile });
+            setPost({ videoFile, video });
           }}
         />
       )}
-      {post && <PostDialog videoFile={post.videoFile} onClose={() => setPost(null)} />}
+      {post && <PostDialog videoFile={post.videoFile} video={post.video} onClose={() => setPost(null)} />}
     </div>
   );
 }

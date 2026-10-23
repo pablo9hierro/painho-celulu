@@ -18,7 +18,7 @@ const QUALITY = [
   { id: 'light', label: 'Leve', crf: 24 },
 ] as const;
 
-export function ExportDialog({ onClose, onPost }: { onClose: () => void; onPost?: (videoFile: string) => void }) {
+export function ExportDialog({ onClose, onPost }: { onClose: () => void; onPost?: (videoFile: string, video: Blob) => void }) {
   const project = useEditor((s) => s.project)!;
   const duration = projectDuration(project);
   const [res, setRes] = useState<'full' | 'hd'>('full');
@@ -220,7 +220,7 @@ export function ExportDialog({ onClose, onPost }: { onClose: () => void; onPost?
                   </button>
                 </div>
                 {onPost && (
-                  <button className="btn primary wide post-next" onClick={() => onPost(result.file)} data-testid="go-post">
+                  <button className="btn primary wide post-next" onClick={() => onPost(result.file, result.blob)} data-testid="go-post">
                     Publicar no Instagram · escrever a legenda
                   </button>
                 )}

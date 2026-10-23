@@ -21,7 +21,8 @@ import { writeStory } from './writer';
 import { withTrendingHashtags } from './hashtags';
 import { styleCaption } from './unicodeStyle';
 import { listNews, siteActiveUsers, type SiteNews } from './websg';
-import { mediaInsights, onlineFollowers, collabUsernames, publishReel } from './instagram';
+import { mediaInsights, onlineFollowers, collabUsernames, postComment, publishReel } from './instagram';
+import { cidadeDoTitulo, NOTA_MINIMA, notas, ordenar } from './igPick';
 import { keyEngagementWord, reorderByIgHeat } from './igEngagement';
 import { brt, learnedBoost, measure, normalizeState, postingSlots, recordActive, recordViews, report, type LearnState } from './learning';
 import { loadTones, noteTrackUse, resolveTone, TRECHO_S } from './tones';
@@ -31,6 +32,7 @@ import { getAiKey, nativeHttp, nativePost } from './client';
 import { siteList, getIgConfig, getSiteConfig, nativeIgHttp, nativePautaHttp, nativeSiteHttp, setIgConfig, withBase } from './postadorClient';
 import { firstPhoto, loadQueue, postToBlog } from './blogPost';
 import { videoTexts } from './videoTexts';
+import { censorCaption } from './censor';
 import { downloadFromLink } from './downloadClient';
 import { createStoryVideo } from '../ui/storyVideo';
 import { exporter, media as mediaApi, projects } from '../platform/api';
@@ -410,40 +412,48 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
     log(st, 'Instagram: sem token. Coloque em ⚙ Configurações.');
     return false;
   }
+  const chat = aiChat(getAiKey(), nativePost);
   let n = chosen;
+  let cidadeEscolhida: string | null = chosen ? cidadeDoTitulo(chosen.title) : null;
   if (!n) {
     const posted = new Set(st.stories.filter((s) => s.igId && s.siteId).map((s) => s.siteId!));
-    const ranked = rankForInstagram(sitePosts, posted, now);
-    if (!ranked.length) {
-      log(st, 'Instagram: nenhuma matéria do blog com pelo menos 1 h no ar (últimas 24 h) que ainda não foi ao Instagram.');
+    // publicadas no blog nas últimas 24 h que ainda não foram ao Instagram (sem esperar visualização)
+    const cands = sitePosts.filter(
+      (x) => !posted.has(x.id) && !/revis|inativ|agend/i.test(x.status ?? '') && (!x.date || now.getTime() - new Date(x.date).getTime() <= 24 * 3600_000),
+    );
+    if (!cands.length) {
+      log(st, 'Instagram: nenhuma matéria nova do blog (últimas 24 h) que ainda não foi ao Instagram.');
       return false;
     }
-    // critério rígido: só entra quem ganhou a briga de engajamento no blog (metade de cima do dia); com poucas candidatas, não restringe
-    const medianaPh = [...ranked].map((c) => c.perHour).sort((a, b) => a - b)[Math.floor(ranked.length / 2)] ?? 0;
-    const fortes = ranked.length >= 4 ? ranked.filter((c) => c.perHour >= medianaPh) : ranked;
+    // a IA dá nota de impacto/polêmica (só para as que ainda não têm nota)
+    setStatus({ step: 'Avaliando impacto e polêmica das matérias…' });
+    const ns = await notas(chat, cands);
+    const hoje = brt(now).day;
+    const cidadesHoje = new Set(st.stories.filter((s) => s.igId && s.city && brt(new Date(s.postedAt)).day === hoje).map((s) => s.city!));
+    const fortes = ordenar(cands, ns, cidadesHoje);
     if (!fortes.length) {
-      log(st, 'Instagram: nenhuma matéria se destacou o suficiente hoje; não posta por postar.');
+      log(st, `Instagram: nada forte o bastante agora (nota mínima ${NOTA_MINIMA}/10 de impacto/polêmica); não posta por postar.`);
       return false;
     }
-    // desempate pelo que está engajando DE VERDADE no Instagram agora (hashtag do assunto), não só no nosso site
+    // desempate pelo engajamento real do Instagram no assunto (só entre as de mesma força)
     setStatus({ step: 'Comparando engajamento no Instagram…' });
-    const porCalor = await reorderByIgHeat(nativeIgHttp, { userId: ig.userId, token }, fortes, (c) => keyEngagementWord(c.item.categoria ?? '', null, []), 5);
-    if (porCalor[0]?.heat !== null && porCalor[0] !== undefined) log(st, `Instagram: "${porCalor[0].item.item.title}" é o assunto mais quente agora.`);
-    n = porCalor[0]!.item.item;
-    // dentro do que engaja bem, prioriza quem tem vídeo (sem perder a força do assunto)
+    const topo = fortes.filter((x) => x.nota.nota >= fortes[0]!.nota.nota - 1 && (x.nota.cidade ?? '') === (fortes[0]!.nota.cidade ?? ''));
+    const porCalor = await reorderByIgHeat(nativeIgHttp, { userId: ig.userId, token }, topo.length > 1 ? topo : fortes.slice(0, 1), (x) => x.nota.hashtag || keyEngagementWord(x.item.categoria ?? '', x.nota.cidade, []), 3);
+    let escolha = porCalor[0]!.item;
+    // entre as de mesma força, prioriza quem tem vídeo
     setStatus({ step: 'Procurando matéria com vídeo…' });
-    for (const { item: c } of porCalor.slice(0, 4)) {
+    for (const { item: c } of porCalor.slice(0, 3)) {
       const html = await nativeHttp.getText(c.item.url).then((r) => r.text).catch(() => '');
       if (html && articleVideos(html, c.item.url).length) {
-        n = c.item;
+        escolha = c;
         pageCache.set(c.item.url, html);
         break;
       }
     }
-    const ph = ranked.find((c) => c.item.id === n!.id)?.perHour ?? 0;
-    log(st, `Instagram: escolhida "${n.title}" (${n.views} visualizações, ${ph.toFixed(0)}/h).`);
+    n = escolha.item;
+    cidadeEscolhida = escolha.nota.cidade;
+    log(st, `Instagram: escolhida "${n.title}" (${escolha.porque}).`);
   } else log(st, `Instagram: postando "${n.title}" (escolhida na lista).`);
-  const chat = aiChat(getAiKey(), nativePost);
   setStatus({ step: 'Lendo a matéria…' });
   // dados da matéria: do app (já tem tudo) ou da página pública do site
   const mine = loadQueue().find((q) => q.siteId === n.id);
@@ -526,11 +536,12 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
     ];
     let caption = '';
     try {
-      caption = styleCaption((await withTrendingHashtags(await writeStory(titulo, texts, chat, 'Legenda do Reels com o post em vídeo desta matéria.'), texts, nativeHttp)).text);
+      // palavras sensíveis disfarçadas (a Meta derruba alcance), depois o negrito
+      caption = styleCaption(censorCaption((await withTrendingHashtags(await writeStory(titulo, texts, chat, 'Legenda do Reels com o post em vídeo desta matéria.'), texts, nativeHttp)).text));
     } catch {
       /* reserva abaixo */
     }
-    if (!caption) caption = `${titulo}\n\n${vt.subtitulo}\n\nMatéria completa em primeirasnoticias.com.br`;
+    if (!caption) caption = censorCaption(`${titulo}\n\n${vt.subtitulo}\n\nMatéria completa em primeirasnoticias.com.br`);
     setStatus({ step: 'Enviando ao Instagram…' });
     const r = await publishReel(nativeIgHttp, { userId: ig.userId, token }, video, caption, {
       coverAtMs: 7500,
@@ -550,10 +561,18 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
       postedAt: now.toISOString(),
       siteId: n.id,
       igId: r.id,
+      ...(cidadeEscolhida ? { city: cidadeEscolhida } : {}),
     });
     st.stories = st.stories.slice(-400);
     saveState(st);
     log(st, `Instagram: Reels publicado ("${vt.titulo}").`);
+    // a mesma descrição como 1º comentário (fixar o comentário a API não permite: só no app do Instagram)
+    try {
+      await postComment(nativeIgHttp, { userId: ig.userId, token }, r.id, caption);
+      log(st, 'Instagram: descrição publicada também como comentário.');
+    } catch (e) {
+      log(st, `Instagram: não deu para comentar (${(e as Error).message}).`);
+    }
     return true;
   } finally {
     // só serve para postar: apaga do aparelho a foto, o projeto e o vídeo

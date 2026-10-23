@@ -30,6 +30,7 @@ async function editVideo(file: File): Promise<void> {
 export function DownloadDialog({ onClose }: { onClose: () => void }) {
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState<'download' | 'edit' | null>(null);
+  const [passo, setPasso] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; steps: string[] } | null>(null);
@@ -52,7 +53,8 @@ export function DownloadDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     setFile(null);
     try {
-      const r = await downloadFromLink(link.trim());
+      setPasso('');
+      const r = await downloadFromLink(link.trim(), (s) => setPasso(s.includes('.') ? `Tentando pelo ${s}…` : s));
       take(r.file, r.via);
     } catch (e) {
       const err = e as LinkDownloadError;
@@ -108,7 +110,7 @@ export function DownloadDialog({ onClose }: { onClose: () => void }) {
               Colar
             </button>
             <button className="btn primary" onClick={() => void download()} disabled={!!busy || !link.trim()} data-testid="dl-go">
-              {busy === 'download' ? 'Baixando…' : 'Baixar'}
+              {busy === 'download' ? passo || 'Baixando…' : 'Baixar'}
             </button>
           </div>
         </label>

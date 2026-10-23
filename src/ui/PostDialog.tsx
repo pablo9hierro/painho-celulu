@@ -12,6 +12,9 @@ import { addSpend, brl, getSpend, type Fx } from '../news/cost';
 import type { Article } from '../news/search';
 import { IG_LIMIT } from '../news/writer';
 import { plainCaption, styleCaption } from '../news/unicodeStyle';
+import { censorCaption } from '../news/censor';
+import { publishExported } from '../news/igPublish';
+import { native } from '../news/client';
 import { IconClip, IconClose } from './icons';
 import { writeClipboard } from '../platform/clipboard';
 
@@ -58,7 +61,7 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () => void; videoFile?: string; initialQuery?: string }) {
+export function PostDialog({ onClose, videoFile, video, initialQuery }: { onClose: () => void; videoFile?: string; video?: Blob; initialQuery?: string }) {
   const projectId = useEditor((s) => s.project?.id ?? 'sem-projeto');
   const notify = useEditor((s) => s.notify);
   const saved = load(projectId);
@@ -81,6 +84,8 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
   const [cost, setCost] = useState<{ search: number; write: number }>({ search: 0, write: 0 });
   const [spend, setSpend] = useState(getSpend);
   const [copied, setCopied] = useState<string | null>(null);
+  const [publicando, setPublicando] = useState<string | null>(null);
+  const [publicado, setPublicado] = useState<string | null>(null);
   // o Instagram conta caracteres (letra em negrito Unicode = 1)
   const count = [...text].length;
 
@@ -140,7 +145,8 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
         setCost((c) => ({ ...c, write: c.write + r.costUsd }));
         setSpend(addSpend(r.costUsd));
       }
-      if (r.text) setText(bold ? styleCaption(r.text) : r.text);
+      // palavras sensíveis disfarçadas para a Meta não derrubar o post
+      if (r.text) setText(bold ? styleCaption(censorCaption(r.text)) : censorCaption(r.text));
       else setError('Não foi possível escrever a partir dessas notícias.');
     } catch (e) {
       setError((e as Error).message);
@@ -398,6 +404,31 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
             } data-testid="post-copy">
             Copiar legenda
           </button>
+          {video && (
+            <button
+              className="btn primary"
+              disabled={!text.trim() || !!publicando || !!publicado}
+              onClick={async () => {
+                if (!native) {
+                  notify('Publicar direto funciona no app do celular. No PC, copie a legenda e poste pelo Instagram.', 'error');
+                  return;
+                }
+                setPublicando('Preparando…');
+                try {
+                  const r = await publishExported(video, text, setPublicando);
+                  setPublicado(r.comentario ? 'Publicado no Instagram ✓ (descrição também no comentário)' : 'Publicado no Instagram ✓');
+                  notify('Reels publicado no Instagram.');
+                } catch (e) {
+                  notify((e as Error).message, 'error');
+                } finally {
+                  setPublicando(null);
+                }
+              }}
+              data-testid="post-publish-ig"
+            >
+              {publicando ?? publicado ?? 'Publicar no Instagram agora'}
+            </button>
+          )}
           {videoFile && deviceStorage.share && (
             <button
               className="btn"

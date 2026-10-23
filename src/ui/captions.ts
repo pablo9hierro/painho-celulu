@@ -4,7 +4,7 @@
  * IA transcrever e cria um item "Legenda automática" por frase numa trilha
  * "Legendas" no topo. Gerar de novo substitui as legendas antigas.
  */
-import type { Caption, Project, TextClip } from '../core/model';
+import type { Caption, MediaAsset, Project, TextClip } from '../core/model';
 import { createTextClip } from '../core/factory';
 import { newTrack, placeClip, projectDuration } from '../core/timeline';
 import { mixAudioWindows } from '../engine/webcodecsExporter';
@@ -95,10 +95,17 @@ export function applyCaptions(p: Project, clips: TextClip[]): Project {
   return next;
 }
 
-export async function generateCaptions(opts: { look: CaptionLook; upper: boolean; linhas?: number; align?: 'left' | 'center' | 'right'; onStep?: (s: string) => void; signal?: AbortSignal }): Promise<{ count: number; falantes: number; costUsd: number }> {
-  const s = getEditor();
-  const p = s.project;
-  if (!p) throw new Error('Abra um projeto primeiro.');
+export interface ProjectTranscript {
+  /** frases já encostadas na voz de verdade */
+  segs: Segmento[];
+  /** trechos com voz */
+  regs: Regiao[];
+  falantes: number;
+  costUsd: number;
+}
+
+/** Ouve o áudio do projeto (como vai sair no vídeo) e transcreve com o tempo exato de cada frase. */
+export async function transcribeProject(p: Project, media: Record<string, MediaAsset>, opts: { onStep?: (s: string) => void; signal?: AbortSignal } = {}): Promise<ProjectTranscript> {
   const key = getAiKey();
   if (!key) throw new Error('Coloque a chave da IA em ⚙ Configurações (tela inicial).');
   const dur = projectDuration(p);
@@ -119,7 +126,7 @@ export async function generateCaptions(opts: { look: CaptionLook; upper: boolean
     curLen = 0;
   };
   opts.onStep?.('Lendo o áudio do vídeo…');
-  const has = await mixAudioWindows(p, s.media, dur, async (buf, startSec) => {
+  const has = await mixAudioWindows(p, media, dur, async (buf, startSec) => {
     if (!curLen) curStart = startSec;
     const m = toMono16k(buf);
     cur.push(m);
@@ -129,7 +136,7 @@ export async function generateCaptions(opts: { look: CaptionLook; upper: boolean
   flush();
   if (!has || !chunks.length) throw new Error('Este projeto não tem áudio com fala.');
   const all: Segmento[] = [];
-  // onde tem voz de verdade (para encostar as legendas na fala)
+  // onde tem voz de verdade (para encostar as frases na fala)
   const regs: Regiao[] = chunks.flatMap((c) => speechRegions(c.pcm, RATE, c.start));
   let falantes: Falante[] = [];
   let cost = 0;
@@ -144,10 +151,17 @@ export async function generateCaptions(opts: { look: CaptionLook; upper: boolean
     for (const seg of r.segmentos) all.push({ ...seg, inicio: seg.inicio + ch.start, fim: seg.fim + ch.start });
   }
   if (!all.length) throw new Error('A IA não encontrou fala neste vídeo.');
-  const clips = buildCaptionClips(getEditor().project ?? p, all, opts.look, opts.upper, { linhas: opts.linhas, align: opts.align }, regs);
+  return { segs: all, regs, falantes: new Set(all.map((x) => x.falante)).size, costUsd: cost };
+}
+
+export async function generateCaptions(opts: { look: CaptionLook; upper: boolean; linhas?: number; align?: 'left' | 'center' | 'right'; onStep?: (s: string) => void; signal?: AbortSignal }): Promise<{ count: number; falantes: number; costUsd: number }> {
+  const s = getEditor();
+  const p = s.project;
+  if (!p) throw new Error('Abra um projeto primeiro.');
+  const tr = await transcribeProject(p, s.media, opts);
+  const clips = buildCaptionClips(getEditor().project ?? p, tr.segs, opts.look, opts.upper, { linhas: opts.linhas, align: opts.align }, tr.regs);
   getEditor().apply((pr) => applyCaptions(pr, clips));
-  const speakers = new Set(all.map((x) => x.falante)).size;
-  return { count: clips.length, falantes: speakers, costUsd: cost };
+  return { count: clips.length, falantes: tr.falantes, costUsd: tr.costUsd };
 }
 
 export interface CaptionStyle {

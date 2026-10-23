@@ -113,7 +113,7 @@ test('Postador: tons com áudio, pautas ranqueadas, matéria com destaque/tom e 
   expect(text.fields!.title).toBe('Polícia *prende dois suspeitos* de assalto em Bayeux');
   // chapéu = editoria da matéria (mais confiável que o minititulo da IA)
   expect(text.fields!.kicker).toBe('Policial');
-  expect(cs.some((c) => c.type === 'frame' && c.frame === 'reels-post')).toBe(true);
+  expect(cs.some((c) => c.type === 'frame' && c.frame === 'central')).toBe(true);
   expect(cs.some((c) => c.type === 'image')).toBe(true);
   expect(cs.find((c) => c.type === 'audio')?.name).toContain('tensao-grave');
   // o post tem o tamanho do trecho da música (15 s por padrão)

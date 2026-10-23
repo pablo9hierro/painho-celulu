@@ -1,6 +1,12 @@
 /**
- * Motor do preview: mantém um elemento de mídia por clipe, sincroniza com o
- * relógio da timeline e roteia o áudio por Web Audio (ganho > 100% e fades).
+ * Motor do preview: sincroniza os elementos de mídia com o relógio da timeline
+ * e roteia o áudio por Web Audio (ganho > 100% e fades).
+ *
+ * Cortes sem tela preta: os pedaços de uma mesma mídia revezam em DOIS
+ * players (A/B). Enquanto um toca, o outro fica parado e já posicionado no
+ * começo do próximo pedaço — quando a agulha chega no corte, o quadro já está
+ * pronto. Além de não piscar, limita o número de players (o celular tem poucos
+ * decodificadores de vídeo; um player por pedaço esgotava e ficava preto).
  */
 import type { AudioClip, MediaAsset, Project, VideoClip } from '../core/model';
 import { buildAudioPlan, gainAt, type AudioSegment } from '../core/audio';
@@ -11,7 +17,32 @@ import { createPitchShifter, type PitchShifter } from './pitchShifter';
 type MediaEl = HTMLVideoElement | HTMLAudioElement;
 
 class PreviewEngine {
+  /** players por "vaga" (mídia + número da vaga), não por clipe */
   private els = new Map<string, { el: MediaEl; url: string; pending: number | null }>();
+  /** em qual vaga está cada clipe (recalculado a cada sincronização) */
+  private slotOf = new Map<string, string>();
+  /** último quadro bom de cada vídeo (mostrado enquanto o próximo carrega) */
+  private held = new Map<string, { canvas: HTMLCanvasElement; at: number }>();
+
+  private keepFrame(mediaId: string, v: HTMLVideoElement) {
+    const now = performance.now();
+    let h = this.held.get(mediaId);
+    if (h && now - h.at < 200) return; // copia no máximo 5x por segundo (leve no celular)
+    if (!h) {
+      const k = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(2, Math.round(v.videoWidth * k));
+      canvas.height = Math.max(2, Math.round(v.videoHeight * k));
+      h = { canvas, at: 0 };
+      this.held.set(mediaId, h);
+    }
+    try {
+      h.canvas.getContext('2d')?.drawImage(v, 0, 0, h.canvas.width, h.canvas.height);
+      h.at = now;
+    } catch {
+      /* quadro indisponível agora */
+    }
+  }
   private images = new Map<string, HTMLImageElement>();
   private gains = new WeakMap<MediaEl, GainNode>();
   private audioRoutes = new WeakMap<MediaEl, { src: MediaElementAudioSourceNode; pitch: number; shifter: PitchShifter | null }>();
@@ -22,8 +53,14 @@ class PreviewEngine {
 
   readonly sources: MediaSources = {
     video: (clip) => {
-      const e = this.els.get(clip.id)?.el as HTMLVideoElement | undefined;
-      return e && e.readyState >= 2 && e.videoWidth > 0 ? e : null;
+      const key = this.slotOf.get(clip.id);
+      const e = key ? (this.els.get(key)?.el as HTMLVideoElement | undefined) : undefined;
+      if (e && e.readyState >= 2 && e.videoWidth > 0 && !e.seeking) {
+        this.keepFrame(clip.mediaId, e);
+        return e;
+      }
+      // quadro novo ainda carregando (pulo de corte, celular lento): segura o último quadro bom em vez de tela preta
+      return this.held.get(clip.mediaId)?.canvas ?? (e && e.readyState >= 2 && e.videoWidth > 0 ? e : null);
     },
     image: (mediaId) => {
       const img = this.image(mediaId);
@@ -119,12 +156,12 @@ class PreviewEngine {
     el.muted = v <= 0;
   }
 
-  private ensure(clip: VideoClip | AudioClip): MediaEl | null {
+  private ensure(clip: VideoClip | AudioClip, key: string): MediaEl | null {
     const m = this.media[clip.mediaId];
     if (!m || m.status !== 'ready') return null;
-    const cur = this.els.get(clip.id);
+    const cur = this.els.get(key);
     if (cur && cur.url === m.url) return cur.el;
-    if (cur) this.dispose(clip.id);
+    if (cur) this.dispose(key);
     const el: MediaEl = clip.type === 'video' ? document.createElement('video') : document.createElement('audio');
     el.preload = 'auto';
     el.src = m.url;
@@ -142,7 +179,7 @@ class PreviewEngine {
       }
       this.invalidate();
     });
-    this.els.set(clip.id, entry);
+    this.els.set(key, entry);
     this.route(el);
     return el;
   }
@@ -168,32 +205,86 @@ class PreviewEngine {
     if (Math.abs(el.currentTime - target) > 1 / 120) el.currentTime = target;
   }
 
+  /**
+   * Vagas A/B: pedaços seguidos da mesma mídia alternam entre as vagas 0 e 1;
+   * pedaços que tocam ao mesmo tempo (camadas) ganham vagas a mais.
+   */
+  private assignSlots(p: Project): Map<string, string> {
+    const out = new Map<string, string>();
+    const byMedia = new Map<string, (VideoClip | AudioClip)[]>();
+    for (const c of p.clips) {
+      if (c.type !== 'video' && c.type !== 'audio') continue;
+      const k = `${c.type}:${c.mediaId}`;
+      byMedia.set(k, [...(byMedia.get(k) ?? []), c]);
+    }
+    for (const [k, list] of byMedia) {
+      list.sort((x, y) => x.start - y.start);
+      const slotEnd: number[] = [];
+      let last = -1;
+      for (const c of list) {
+        // alterna com o anterior (o próximo pedaço sempre fica num player livre, já posicionado)
+        let s = slotEnd.findIndex((e, i) => e <= c.start + 1e-3 && i !== last);
+        if (s < 0 && slotEnd.length >= 2) s = slotEnd.findIndex((e) => e <= c.start + 1e-3);
+        if (s < 0) {
+          s = slotEnd.length;
+          slotEnd.push(0);
+        }
+        slotEnd[s] = clipEnd(c);
+        last = s;
+        out.set(c.id, `${k}#${s}`);
+      }
+    }
+    return out;
+  }
+
   /** Sincroniza todos os elementos com o tempo `t`. */
   sync(p: Project, t: number, playing: boolean) {
     const plan = new Map<string, AudioSegment>(buildAudioPlan(p).map((s) => [s.clipId, s]));
-    const alive = new Set<string>();
+    this.slotOf = this.assignSlots(p);
+    // por vaga: o clipe que está tocando agora, ou o próximo (para deixar pronto)
+    const atual = new Map<string, VideoClip | AudioClip>();
+    const proximo = new Map<string, VideoClip | AudioClip>();
     for (const c of p.clips) {
       if (c.type !== 'video' && c.type !== 'audio') continue;
-      alive.add(c.id);
-      const el = this.ensure(c);
-      if (!el) continue;
+      const key = this.slotOf.get(c.id)!;
       const track = p.tracks.find((tr) => tr.id === c.trackId);
       const active = t >= c.start && t < clipEnd(c) && !(c.type === 'video' && track?.hidden);
-      const mediaT = c.sourceIn + (t - c.start) * c.speed;
+      if (active) atual.set(key, c);
+      else if (c.start >= t) {
+        const n = proximo.get(key);
+        if (!n || c.start < n.start) proximo.set(key, c);
+      }
+    }
+    const alive = new Set<string>();
+    for (const key of new Set([...this.slotOf.values()])) {
+      alive.add(key);
+      const c = atual.get(key) ?? proximo.get(key);
+      if (!c) continue;
+      const el = this.ensure(c, key);
+      if (!el) continue;
+      const active = atual.has(key);
       const seg = plan.get(c.id);
-      if (playing && active) {
-        if (el.playbackRate !== c.speed) el.playbackRate = c.speed;
-        this.setGain(el, seg ? gainAt(seg, t) : 0);
-        this.setPitch(el, seg ? seg.pitch : 1);
-        if (el.paused) {
-          el.currentTime = Math.max(0, mediaT);
-          void el.play().catch(() => undefined);
-        } else if (Math.abs(el.currentTime - mediaT) > 0.25) {
-          el.currentTime = Math.max(0, mediaT);
+      if (active) {
+        const mediaT = c.sourceIn + (t - c.start) * c.speed;
+        if (playing) {
+          if (el.playbackRate !== c.speed) el.playbackRate = c.speed;
+          this.setGain(el, seg ? gainAt(seg, t) : 0);
+          this.setPitch(el, seg ? seg.pitch : 1);
+          if (el.paused) {
+            if (Math.abs(el.currentTime - mediaT) > 0.05) el.currentTime = Math.max(0, mediaT);
+            void el.play().catch(() => undefined);
+          } else if (Math.abs(el.currentTime - mediaT) > 0.25) {
+            el.currentTime = Math.max(0, mediaT);
+          }
+        } else {
+          if (!el.paused) el.pause();
+          if (c.type === 'video') this.seek(key, mediaT);
         }
       } else {
+        // vaga livre: para e já espera no 1º quadro do próximo pedaço
         if (!el.paused) el.pause();
-        if (active && c.type === 'video') this.seek(c.id, mediaT);
+        this.setGain(el, 0);
+        this.seek(key, c.sourceIn);
       }
     }
     for (const id of [...this.els.keys()]) if (!alive.has(id)) this.dispose(id);

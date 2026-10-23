@@ -2565,3 +2565,6 @@ input[type='range'] {
 .pauta-lote { margin: 4px 0 8px; flex-wrap: wrap; }
 
 .post-links { resize: vertical; min-height: 44px; font-family: inherit; }
+
+.ai-edit-input, .ai-edit-cmd-text { resize: vertical; font-family: inherit; width: 100%; }
+.ai-edit-cmd-text { padding-right: 34px; }

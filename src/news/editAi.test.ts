@@ -87,3 +87,20 @@ describe('contexto para a IA: agulha e cantos', () => {
     expect(blur.transform.y).toBeLessThan(p.height / 2); // lado de cima
   });
 });
+
+describe('transcrição automática no contexto da IA', () => {
+  it('sem legendas, usa a transcrição com início e fim de cada palavra', async () => {
+    const { buildContext } = await import('./editAi');
+    const p = createProject('t', 'reel');
+    const ctx = buildContext(p, 0, {
+      segs: [{ falante: 1, inicio: 1, fim: 3, texto: 'pessoal urgente agora' }],
+      regs: [{ ini: 1, fim: 3 }],
+    });
+    expect(ctx.falas).toHaveLength(1);
+    const w = ctx.falas[0]!.palavras!;
+    expect(w.map((x) => x[0])).toEqual(['pessoal', 'urgente', 'agora']);
+    expect(w[0]![1]).toBeCloseTo(1, 1);
+    expect(w[2]![2]).toBeCloseTo(3, 1); // a última palavra termina no fim da frase
+    for (const x of w) expect(x[2]).toBeGreaterThan(x[1]);
+  });
+});

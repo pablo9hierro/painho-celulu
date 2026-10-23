@@ -5,7 +5,7 @@
  * matéria original nas mesmas posições (parágrafo, imagem, parágrafo...).
  */
 import type { Block, Pauta } from './pautas';
-import { cleanText, slopIssues, unverifiedFacts, type Chat } from './writer';
+import { cleanText, repeatedParagraphs, slopIssues, unverifiedFacts, type Chat } from './writer';
 
 export const CATEGORIAS = ['Policial', 'Política', 'Cidades', 'Esporte', 'Economia', 'Saúde', 'Educação', 'Cultura', 'Brasil', 'Mundo', 'Entretenimento'] as const;
 
@@ -41,6 +41,7 @@ REGRAS
 4. Parágrafos curtos (1 a 3 frases), voz ativa, de 5 a 12 parágrafos conforme o tamanho da fonte.
 5. PROIBIDO: travessão (—), emojis, exclamação, perguntas retóricas, "vale ressaltar", "é importante destacar", "em meio a", "chocou a comunidade", "trágico", "cenário", "crucial", "fundamental", "não apenas... mas também", "em suma", "confira".
 6. Não copie frases inteiras da fonte: reescreva com as mesmas informações.
+7. CADA PARÁGRAFO TRAZ INFORMAÇÃO NOVA: nunca repita o fato principal com outras palavras (ex.: abrir com "PM salva homem que caiu do prédio" e no 2º parágrafo dizer de novo "o homem caiu e o PM salvou" é PROIBIDO). Depois do primeiro parágrafo, siga com os DETALHES que estão nas fontes, nesta ordem, só o que existir: como aconteceu passo a passo (horário, local exato, rua, bairro), quem são os envolvidos (nome, idade, profissão, cargo), o que disseram (falas entre aspas, atribuídas), o que a polícia/órgão fez (prisão, delegacia, perícia, hospital, estado de saúde), números, antecedentes/contexto citado nas fontes e o que acontece a seguir. Use TODOS os dados concretos das fontes; se as fontes forem várias, junte os detalhes de todas. Texto jornalístico, fluido, sem ser seco: frases ligadas com sentido, não uma lista de frases soltas.
 Responda SOMENTE com JSON:
 {"titulo": "até 90 caracteres, letras normais", "subtitulo": "uma frase que complementa o título", "minititulo": "1 a 3 palavras em maiúsculas (ex.: POLÍCIA)", "categoria": "uma de: ${CATEGORIAS.join(', ')}", "palavras_chave": ["5 termos"], "destaque": "o trecho do título (2 a 4 palavras, copiado EXATAMENTE como está no título) que é o coração da notícia, para ser destacado no vídeo (ex.: título 'Bolsonaro não poderá votar no segundo turno' → 'não poderá votar')", "paragrafos": ["..."]}`;
 
@@ -163,7 +164,34 @@ export async function writeSiteStory(p: Pauta, rawChat: Chat | null, prompt = ''
     j = { titulo: p.title, subtitulo: '', minititulo: (p.city ?? 'NOTÍCIA').toUpperCase(), categoria: p.city ? 'Cidades' : 'Brasil', palavras_chave: [], paragrafos: ps.length ? [`Segundo o ${p.source}, ${ps[0]!.charAt(0).toLowerCase()}${ps[0]!.slice(1)}`, ...ps.slice(1)] : [p.snippet || p.title] };
     steps.push('Rascunho sem IA (revise antes de publicar).');
   }
-  const paragrafos = (j.paragrafos ?? []).map((x) => cleanText(String(x))).filter((x) => x.length > 0);
+  let paragrafos = (j.paragrafos ?? []).map((x) => cleanText(String(x))).filter((x) => x.length > 0);
+  // parágrafo repetindo o que já foi dito: pede para trocar por detalhe novo da fonte
+  const rep = repeatedParagraphs(paragrafos);
+  if (rep.length && chat && fonteTexto.length > 200) {
+    try {
+      const r = await chat(
+        [
+          { role: 'system', content: SYSTEM },
+          {
+            role: 'user',
+            content: `${fonte}\n\nMATÉRIA:\n${JSON.stringify(j)}\n\nOs parágrafos ${rep.map((x) => x + 1).join(', ')} repetem informação de parágrafos anteriores. Reescreva a matéria trocando a repetição por DETALHES NOVOS que estão na fonte (como aconteceu, quem, onde, falas, o que a polícia/órgão fez, números, contexto). Não invente nada. Devolva o MESMO formato JSON.`,
+          },
+        ],
+        { json: true, maxTokens: 3000 },
+      );
+      const c = parse(r.content);
+      if (c?.paragrafos?.length) {
+        const novos = c.paragrafos.map((x) => cleanText(String(x))).filter((x) => x.length > 0);
+        if (repeatedParagraphs(novos).length < rep.length) {
+          paragrafos = novos;
+          j = { ...j, paragrafos: c.paragrafos };
+          steps.push('Revisão: parágrafos repetidos trocados por detalhes da fonte.');
+        }
+      }
+    } catch {
+      /* segue com o texto como está */
+    }
+  }
   const all = `${j.titulo}\n${j.subtitulo}\n${paragrafos.join('\n')}`;
   const style = slopIssues(all);
   const unverified = unverifiedFacts(`TITULO\n\n${all}`, sources);
