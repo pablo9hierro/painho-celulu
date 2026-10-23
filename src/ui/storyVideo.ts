@@ -9,7 +9,7 @@
  * - a trilha do tom da matéria, se houver.
  * O app abre o projeto no editor; a automação renderiza o mesmo projeto.
  */
-import type { FormatId, MediaAsset, Project, VisualClip } from '../core/model';
+import type { FormatId, Keyframe, MediaAsset, Project, Transform, VisualClip } from '../core/model';
 import { createAudioClip, createBlurClip, createImageClip, createVideoClip, createProject, createTextClip, fitContain } from '../core/factory';
 import { coverWindow, frameWindow, getFrame, insertFrame } from '../core/frames';
 import { placeClip } from '../core/timeline';
@@ -20,6 +20,54 @@ import { ensureTrackMedia } from '../news/defaultTones';
 
 export const STORY_FRAME = 'reels-post';
 export const STORY_SECONDS = 15;
+
+/**
+ * "Snap zoom" (corte e reencaixe): em vez de um zoom lento e contínuo, fica
+ * PARADO numa moldura por um tempo e, de repente, pula rapidinho pra outra
+ * moldura (um pouco mais perto e um pouco deslocada) — o efeito de editor que
+ * parece um corte de cena sem cortar de verdade. Cresce aos poucos (nunca
+ * volta a diminuir) até um teto, pra não ficar exagerado em vídeos longos.
+ */
+const SNAP_CYCLE_S = 2.1;
+const SNAP_DUR_S = 0.16;
+const SNAP_STEP = 0.045;
+const SNAP_MAX_SCALE = 1.22;
+const SNAP_FOCOS: { x: number; y: number }[] = [
+  { x: 0, y: 0 },
+  { x: -1, y: -0.4 },
+  { x: 1, y: 0.4 },
+  { x: -1, y: 0.6 },
+  { x: 1, y: -0.6 },
+];
+
+export function snapZoomKeyframes(base: Transform, duration: number): Keyframe[] {
+  const ciclos = Math.max(1, Math.ceil(duration / SNAP_CYCLE_S));
+  const out: Keyframe[] = [{ ...base, t: 0, easing: 'linear' }];
+  let atual = base;
+  for (let i = 0; i < ciclos; i++) {
+    const fimParado = Math.min(duration, (i + 1) * SNAP_CYCLE_S - SNAP_DUR_S);
+    const fimPulo = Math.min(duration, (i + 1) * SNAP_CYCLE_S);
+    if (fimParado <= out[out.length - 1]!.t) break;
+    // parado: mantém a mesma moldura até pouco antes do próximo pulo
+    out.push({ ...atual, t: fimParado, easing: 'linear' });
+    if (fimPulo <= fimParado) break;
+    const scale = Math.min(SNAP_MAX_SCALE, atual.width / base.width + SNAP_STEP);
+    const f = SNAP_FOCOS[i % SNAP_FOCOS.length]!;
+    const novo: Transform = {
+      ...base,
+      width: base.width * scale,
+      height: base.height * scale,
+      x: base.x + (f.x * base.width * (scale - 1)) / 2,
+      y: base.y + (f.y * base.height * (scale - 1)) / 2,
+    };
+    // pulo rápido pra nova moldura (o "corte e reencaixe")
+    out.push({ ...novo, t: fimPulo, easing: 'ease-out' });
+    atual = novo;
+  }
+  const last = out[out.length - 1]!;
+  if (last.t < duration) out.push({ ...last, t: duration, easing: 'linear' });
+  return out;
+}
 
 export interface StoryVideoInput {
   kicker: string;
@@ -65,13 +113,13 @@ export function buildStoryProject(
     const ratio = (m.width || 16) / (m.height || 9);
     // cobre a janela da moldura; o que sobra fica escondido atrás do fundo da moldura
     const start = coverWindow(def, p.width, p.height, ratio);
-    const end = { ...start, width: start.width * 1.07, height: start.height * 1.07 };
     img.transform = start;
     img.duration = duration;
-    img.keyframes = [
-      { ...start, t: 0, easing: 'linear' },
-      { ...end, t: duration, easing: 'linear' },
-    ];
+    // foto: corte-e-reencaixe (fica parado e pula pra uma moldura nova de vez em
+    // quando); vídeo já tem motion próprio, fica só o zoom lento de sempre
+    img.keyframes = isVideo
+      ? [{ ...start, t: 0, easing: 'linear' }, { ...start, width: start.width * 1.07, height: start.height * 1.07, t: duration, easing: 'linear' }]
+      : snapZoomKeyframes(start, duration);
     p = placeClip(p, img, visual?.id);
     // foto em pé, quadrada ou panorâmica: a cobertura cortaria demais. Fica
     // inteira na janela, sobre a própria foto desfocada preenchendo o fundo.

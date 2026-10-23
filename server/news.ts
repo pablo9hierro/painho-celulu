@@ -3,7 +3,7 @@
  * redação da legenda com IA (chave só no servidor, em .env.local: AI_API_KEY).
  */
 import type { Express, Request, Response } from 'express';
-import { fetchArticle, searchRecent, type Article, type Http } from '../src/news/search';
+import { articleFromUrl, fetchArticle, searchRecent, type Article, type Http } from '../src/news/search';
 import { planSearch } from '../src/news/plan';
 import { writeStory } from '../src/news/writer';
 import { aiChat } from '../src/news/openrouter';
@@ -57,6 +57,21 @@ export function registerNews(app: Express, json: (req: Request, res: Response, n
     } catch (e) {
       res.status(502).json({ error: `Não foi possível buscar notícias: ${(e as Error).message}` });
     }
+  });
+
+  // o jornalista cola um ou mais links de matérias prontas (de qualquer portal) pra se inspirar
+  app.post('/api/news/from-link', json, async (req, res) => {
+    const urls = ((req.body as { urls?: string[] }).urls ?? []).slice(0, 8);
+    const out: Article[] = [];
+    const falhas: string[] = [];
+    for (const u of urls) {
+      try {
+        out.push(await articleFromUrl(String(u), nodeHttp));
+      } catch (e) {
+        falhas.push(`${u}: ${(e as Error).message}`);
+      }
+    }
+    res.json({ articles: out, falhas });
   });
 
   app.post('/api/news/write', json, async (req, res) => {

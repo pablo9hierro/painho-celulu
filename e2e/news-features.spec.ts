@@ -154,3 +154,34 @@ test('logo do encerramento escolhida é obedecida (mesmo depois de reabrir)', as
   });
   expect(reds).toBeGreaterThan(200);
 });
+
+test('Postagem: colar links de matérias (sem buscar por palavra-chave) também funciona', async ({ page }) => {
+  await page.route('**/api/news/config', (r) => r.fulfill({ json: { ai: true } }));
+  await page.route('**/api/fx', (r) => r.fulfill({ json: { rate: 5, at: '2026-10-22', approx: false } }));
+  await page.route('**/api/news/from-link', (r) => {
+    const urls = (r.request().postDataJSON() as { urls: string[] }).urls;
+    return r.fulfill({
+      json: {
+        articles: urls.map((u, i) => ({ title: `Matéria colada ${i + 1}`, url: u, source: 'Portal Colado', date: '2026-10-22T08:00:00Z', snippet: 'Trecho.', via: 'link', readable: true })),
+        falhas: [],
+      },
+    });
+  });
+  let sent: { articles: { via: string }[] } | null = null;
+  await page.route('**/api/news/write', (r) => {
+    sent = r.request().postDataJSON() as { articles: { via: string }[] };
+    return r.fulfill({ json: { text: 'Matéria escrita a partir dos links.', unverified: [], style: [], model: 'google/gemini-2.5-flash-lite', steps: ['Escrita'], sources: [], costUsd: 0.001 } });
+  });
+  await page.goto('/');
+  await page.getByTestId('hub-news').click();
+  await page.getByTestId('post-links').fill('https://portal1.test/a\nhttps://portal2.test/b');
+  await page.getByTestId('post-links-add').click();
+  await expect(page.getByTestId('post-card')).toHaveCount(2);
+  await expect(page.getByTestId('post-card').first()).toContainText('link colado');
+  // já vêm marcadas: pode escrever direto, sem precisar buscar por palavra-chave
+  await page.getByTestId('post-write').click();
+  await page.getByTestId('post-bold').uncheck();
+  await expect(page.getByTestId('post-text')).toHaveValue(/Matéria escrita a partir dos links/, { timeout: 15_000 });
+  expect(sent!.articles.every((a) => a.via === 'link')).toBe(true);
+  expect(sent!.articles).toHaveLength(2);
+});

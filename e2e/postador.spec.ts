@@ -291,3 +291,43 @@ test('Post em vídeo com música que vem no app: entra na biblioteca e o vídeo 
   expect(r.dur).toBe(15);
   expect(r.total!).toBeGreaterThan(140);
 });
+
+test('Pautas: marcar várias e enviar de uma vez (uma atrás da outra)', async ({ page }) => {
+  const { photo } = fixtures();
+  const P2 = { ...PAUTA, id: 'p2', title: 'Outra pauta nacional em alta', city: null, score: 60, url: 'https://portal.test/2' };
+  await page.route('**/api/fx', (r) => r.fulfill({ json: { rate: 5, at: '2026-10-23', approx: false } }));
+  await page.route('**/api/news/config', (r) => r.fulfill({ json: { ai: true } }));
+  await page.route('**/api/pautas?*', (r) => r.fulfill({ json: { pautas: [PAUTA, P2], plan: null } }));
+  await page.route('**/api/site/write', (r) =>
+    r.fulfill({ json: { titulo: 'Título gerado', subtitulo: 'Sub', minititulo: 'GERAL', categoria: 'Geral', palavrasChave: [], paragrafos: ['Parágrafo.'], imagens: [{ src: 'https://portal.test/foto1.jpg', caption: '' }], html: '<p>Parágrafo.</p>', unverified: [], style: [], model: 'google/gemini-2.5-flash-lite', steps: [], costUsd: 0.0003 } }),
+  );
+  let publicadas: string[] = [];
+  let idSeq = 46300;
+  await page.route('**/api/site/publish', (r) => {
+    publicadas.push((r.request().postDataJSON() as { post: { titulo: string } }).post.titulo);
+    return r.fulfill({ json: { id: idSeq++, steps: [] } });
+  });
+  await page.route('**/api/pautas/image?*', (r) => r.fulfill({ body: readFileSync(photo), contentType: 'image/jpeg' }));
+  await page.goto('/');
+  await page.evaluate(() => localStorage.removeItem('pn-fila-instagram'));
+  await page.getByTestId('hub-postador').click();
+  await page.getByTestId('postador-capture').click();
+  await expect(page.getByTestId('postador-pauta')).toHaveCount(2);
+  // marcar todas
+  await page.getByTestId('postador-marcar-todas').click();
+  await expect(page.getByTestId('postador-check').nth(0)).toBeChecked();
+  await expect(page.getByTestId('postador-check').nth(1)).toBeChecked();
+  await page.getByTestId('postador-enviar-selecionadas').click();
+  await expect(page.getByTestId('postador-post-status')).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.getByTestId('postador-post-status').first()).toContainText('No site');
+  expect(publicadas).toHaveLength(2); // uma atrás da outra
+  // não fica preso marcado depois de postar (some o checkbox das já postadas)
+  await expect(page.getByTestId('postador-check')).toHaveCount(0);
+  // nova leva de pautas (ainda não postadas): marcar só uma funciona normalmente
+  const P3 = { ...PAUTA, id: 'p3', url: 'https://portal.test/3' };
+  await page.route('**/api/pautas?*', (r) => r.fulfill({ json: { pautas: [P3, { ...P2, id: 'p4', url: 'https://portal.test/4' }], plan: null } }));
+  await page.getByTestId('postador-capture').click();
+  await expect(page.getByTestId('postador-check')).toHaveCount(2);
+  await page.getByTestId('postador-check').first().check();
+  await expect(page.getByTestId('postador-enviar-selecionadas')).toContainText('(1)');
+});

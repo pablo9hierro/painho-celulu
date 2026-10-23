@@ -2561,3 +2561,7 @@ input[type='range'] {
 .ai-report-total { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: rgba(31,139,255,0.12); margin: 8px 0; }
 .ai-report-rows { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
 .ai-report-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 2px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+
+.pauta-lote { margin: 4px 0 8px; flex-wrap: wrap; }
+
+.post-links { resize: vertical; min-height: 44px; font-family: inherit; }

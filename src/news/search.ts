@@ -16,8 +16,8 @@ export interface Article {
   /** ISO 8601, quando disponível */
   date: string | null;
   snippet: string;
-  /** de onde veio a notícia */
-  via: 'google' | 'bing' | 'gdelt';
+  /** de onde veio a notícia (ou "link": colado à mão pelo jornalista) */
+  via: 'google' | 'bing' | 'gdelt' | 'link';
   /** dá para abrir e ler o texto completo (link direto do veículo) */
   readable: boolean;
 }
@@ -239,6 +239,35 @@ export async function searchNews(query: string, http: Http, max = 15): Promise<A
 }
 
 const JUNK = /cookie|newsletter|assine|assinante|inscreva|leia (tamb[eé]m|mais)|siga o|clique aqui|todos os direitos|©|whatsapp|publicidade|baixe o app/i;
+
+/**
+ * O jornalista colou o link de uma matéria pronta (de qualquer portal) pra
+ * usar de inspiração: lê a página uma vez pra montar o "cartão" da notícia
+ * (título, fonte, data) — o texto completo é lido depois, no mesmo lugar que
+ * já lê as notícias da busca (fetchArticle), sem duplicar trabalho.
+ */
+export async function articleFromUrl(url: string, http: Http): Promise<Article> {
+  const u = url.trim();
+  if (!/^https?:\/\//i.test(u)) throw new Error(`Link inválido: ${u}`);
+  const r = await http.getText(u);
+  if (r.status >= 400 || !r.text) throw new Error(`Não abriu (HTTP ${r.status}): ${u}`);
+  const html = r.text.slice(0, 3_000_000);
+  const meta = (prop: string) => {
+    const m = new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]*content=["']([^"']*)["']`, 'i').exec(html) ?? new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${prop}["']`, 'i').exec(html);
+    return m ? decodeEntities(m[1]!).trim() : '';
+  };
+  const title = meta('og:title') || decodeEntities(stripTags(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? '')).trim();
+  if (!title) throw new Error(`Não achei o título da matéria: ${u}`);
+  let source = meta('og:site_name');
+  if (!source) {
+    try {
+      source = new URL(r.url || u).hostname.replace(/^www\./, '');
+    } catch {
+      source = 'portal';
+    }
+  }
+  return { title, url: r.url || u, source, date: isoDate(meta('article:published_time')), snippet: meta('og:description') || meta('description'), via: 'link', readable: true };
+}
 
 /** Lê a página do veículo e extrai título, data e o texto principal da matéria. */
 export async function fetchArticle(a: Pick<Article, 'url' | 'title' | 'source' | 'date' | 'snippet'>, http: Http): Promise<ArticleText> {

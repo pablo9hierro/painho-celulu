@@ -5,7 +5,7 @@
  *   com a chave guardada no próprio aparelho.
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { fetchArticle, searchRecent, type Article, type ArticleText, type Http, type Window } from './search';
+import { articleFromUrl, fetchArticle, searchRecent, type Article, type ArticleText, type Http, type Window } from './search';
 import { planSearch, type SearchPlan } from './plan';
 import { writeStory, type StoryResult } from './writer';
 import { aiChat } from './openrouter';
@@ -101,6 +101,28 @@ export async function findNews(query: string): Promise<{ articles: Article[]; pl
   }
   const r = await api<{ articles: Article[]; plan?: NewsPlan }>(`/api/news?q=${encodeURIComponent(query)}`);
   return { articles: r.articles, plan: r.plan ?? null };
+}
+
+/** O jornalista colou um ou mais links de matérias prontas: lê cada um pra usar de inspiração. */
+export async function findFromLinks(urls: string[]): Promise<{ articles: Article[]; falhas: string[] }> {
+  const list = urls.map((u) => u.trim()).filter(Boolean);
+  if (native) {
+    const articles: Article[] = [];
+    const falhas: string[] = [];
+    for (const u of list) {
+      try {
+        articles.push(await articleFromUrl(u, nativeHttp));
+      } catch (e) {
+        falhas.push(`${u}: ${(e as Error).message}`);
+      }
+    }
+    return { articles, falhas };
+  }
+  return api<{ articles: Article[]; falhas: string[] }>('/api/news/from-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls: list }),
+  });
 }
 
 export async function findTrends(refresh = false): Promise<TrendsResult> {

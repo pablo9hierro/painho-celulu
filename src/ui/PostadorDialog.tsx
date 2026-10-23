@@ -104,6 +104,9 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
   const [ai, setAi] = useState<boolean | null>(null);
   /** andamento/resultado do "Postar no site" de cada notícia */
   const [post, setPost] = useState<Record<string, { msg: string; ok?: boolean }>>({});
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  /** postagem em lote: quantas já foram e quantas faltam */
+  const [lote, setLote] = useState<{ feitas: number; total: number } | null>(null);
   useEffect(() => {
     void getFx().then(setFx);
     void aiReady().then(setAi);
@@ -198,6 +201,35 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
     }
   };
 
+  /** posta uma a uma, na ordem; não para se uma falhar, segue para as próximas */
+  const postMany = async (ids: string[]) => {
+    const alvo = ids.filter((id) => post[id]?.ok !== true);
+    if (!alvo.length) return;
+    setBusy('postall');
+    setLote({ feitas: 0, total: alvo.length });
+    for (let i = 0; i < alvo.length; i++) {
+      const p = pautas?.find((x) => x.id === alvo[i]);
+      if (!p) continue;
+      const set = (msg: string, ok?: boolean) => setPost((m) => ({ ...m, [p.id]: { msg, ok } }));
+      try {
+        const r = await postToBlog(p, { prompt, onStep: (m) => set(m) });
+        if (r.story.costUsd) addSpend(r.story.costUsd);
+        set(`✓ No site${r.siteId ? ` (nº ${r.siteId})` : ''}, publicada`, true);
+      } catch (e) {
+        set(`✗ ${(e as Error).message}`, false);
+      }
+      setLote({ feitas: i + 1, total: alvo.length });
+    }
+    setSelecionadas((s) => new Set([...s].filter((id) => !alvo.includes(id))));
+    notify(`${alvo.length} matéria(s) postada(s) no site.`);
+    setLote(null);
+    setBusy(null);
+  };
+
+  const postaveis = (pautas ?? []).filter((p) => post[p.id]?.ok !== true);
+  const toggleSel = (id: string) => setSelecionadas((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const marcarTodas = () => setSelecionadas(selecionadas.size === postaveis.length ? new Set() : new Set(postaveis.map((p) => p.id)));
+
   return (
     <>
       <label className="field">
@@ -221,30 +253,58 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
       {error && <p className="error-text">{error}</p>}
 
       {pautas && !open && (
-        <div className="post-cards" data-testid="postador-list">
-          {pautas.map((p, i) => (
-            <div key={p.id} className="post-card pauta-card" data-testid="postador-pauta">
-              <span className="pauta-rank">{i + 1}</span>
-              <span className="post-card-body" role="button" tabIndex={0} onClick={() => { setOpen(p); setStory(null); }}>
-                <strong>{p.title}</strong>
-                <span className="muted small">
-                  {p.source} · {ago(p.date)}
-                  {p.city ? ` · ${p.city}` : ' · nacional'}
-                  {p.coverage > 1 ? ` · ${p.coverage} veículos` : ''}
-                </span>
-                <span className="small">
-                  <b>{p.score} pts</b> · {p.paragraphs} parágrafos · fotos {p.imagesOk}✓{p.images - p.imagesOk > 0 ? ` ${p.images - p.imagesOk}✗` : ''}
-                  {p.videos ? ` · ${p.videos} vídeo(s)` : ''}
-                  {p.trendHits ? ' · em alta' : ''}
-                </span>
-                {post[p.id] && <span className={`small ${post[p.id]!.ok === false ? 'error-text' : ''}`} data-testid="postador-post-status">{post[p.id]!.msg}</span>}
-              </span>
-              <button className="btn sm primary pauta-post" disabled={!!busy || post[p.id]?.ok === true} onClick={() => void postSite(p)} data-testid="postador-post">
-                {busy === `post:${p.id}` ? 'Postando…' : post[p.id]?.ok ? 'Postada ✓' : 'Postar no site'}
+        <>
+          {postaveis.length > 0 && (
+            <div className="row-gap pauta-lote" data-testid="postador-lote-bar">
+              <button className="btn sm" onClick={marcarTodas} disabled={busy === 'postall'} data-testid="postador-marcar-todas">
+                {selecionadas.size === postaveis.length ? 'Desmarcar todas' : `Marcar todas (${postaveis.length})`}
+              </button>
+              <button
+                className="btn sm primary"
+                disabled={!selecionadas.size || busy === 'postall'}
+                onClick={() => void postMany([...selecionadas])}
+                data-testid="postador-enviar-selecionadas"
+              >
+                {busy === 'postall' && lote ? `Postando ${lote.feitas} de ${lote.total}…` : `Enviar selecionadas (${selecionadas.size})`}
               </button>
             </div>
-          ))}
-        </div>
+          )}
+          <div className="post-cards" data-testid="postador-list">
+            {pautas.map((p, i) => (
+              <div key={p.id} className="post-card pauta-card" data-testid="postador-pauta">
+                {post[p.id]?.ok !== true && (
+                  <input
+                    type="checkbox"
+                    className="pauta-check"
+                    checked={selecionadas.has(p.id)}
+                    onChange={() => toggleSel(p.id)}
+                    disabled={busy === 'postall'}
+                    aria-label={`Selecionar "${p.title}"`}
+                    data-testid="postador-check"
+                  />
+                )}
+                <span className="pauta-rank">{i + 1}</span>
+                <span className="post-card-body" role="button" tabIndex={0} onClick={() => { setOpen(p); setStory(null); }}>
+                  <strong>{p.title}</strong>
+                  <span className="muted small">
+                    {p.source} · {ago(p.date)}
+                    {p.city ? ` · ${p.city}` : ' · nacional'}
+                    {p.coverage > 1 ? ` · ${p.coverage} veículos` : ''}
+                  </span>
+                  <span className="small">
+                    <b>{p.score} pts</b> · {p.paragraphs} parágrafos · fotos {p.imagesOk}✓{p.images - p.imagesOk > 0 ? ` ${p.images - p.imagesOk}✗` : ''}
+                    {p.videos ? ` · ${p.videos} vídeo(s)` : ''}
+                    {p.trendHits ? ' · em alta' : ''}
+                  </span>
+                  {post[p.id] && <span className={`small ${post[p.id]!.ok === false ? 'error-text' : ''}`} data-testid="postador-post-status">{post[p.id]!.msg}</span>}
+                </span>
+                <button className="btn sm primary pauta-post" disabled={!!busy || post[p.id]?.ok === true} onClick={() => void postSite(p)} data-testid="postador-post">
+                  {busy === `post:${p.id}` ? 'Postando…' : post[p.id]?.ok ? 'Postada ✓' : 'Postar no site'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {open && (

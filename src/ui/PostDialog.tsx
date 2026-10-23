@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useEditor } from '../state/store';
 import { useBackHandler } from '../platform/backButton';
 import { deviceStorage } from '../platform/api';
-import { aiReady, findNews, getAiKey, getFx, setAiKey, writeFromNews, type NewsPlan, type WriteResult } from '../news/client';
+import { aiReady, findFromLinks, findNews, getAiKey, getFx, setAiKey, writeFromNews, type NewsPlan, type WriteResult } from '../news/client';
 import { addSpend, brl, getSpend, type Fx } from '../news/cost';
 import type { Article } from '../news/search';
 import { IG_LIMIT } from '../news/writer';
@@ -69,7 +69,9 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
   const [prompt, setPrompt] = useState('');
   const [text, setText] = useState(saved.text);
   const [info, setInfo] = useState<WriteResult | null>(null);
-  const [busy, setBusy] = useState<'search' | 'write' | null>(null);
+  const [busy, setBusy] = useState<'search' | 'write' | 'links' | null>(null);
+  const [links, setLinks] = useState('');
+  const [linksErr, setLinksErr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ai, setAi] = useState<boolean | null>(null);
   const [keyDraft, setKeyDraft] = useState(getAiKey());
@@ -105,15 +107,19 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
     setError(null);
     try {
       const { articles: list, plan: p } = await findNews(query);
-      setArticles(list);
+      // mantém os links colados à mão (uma busca nova não some com eles)
+      setArticles((cur) => {
+        const colados = (cur ?? []).filter((a) => a.via === 'link');
+        return [...colados, ...list.filter((a) => !colados.some((c) => c.url === a.url))];
+      });
       setPlan(p);
       if (p?.costUsd) {
         setCost((c) => ({ ...c, search: c.search + p.costUsd! }));
         setSpend(addSpend(p.costUsd));
       }
-      // já marca as mais relevantes que dá para ler por completo
+      // já marca as mais relevantes que dá para ler por completo (mantém os links já marcados)
       const readable = list.filter((a) => a.readable).slice(0, 4);
-      setPicked(new Set((readable.length ? readable : list.slice(0, 3)).map((a) => a.url)));
+      setPicked((s) => new Set([...[...s].filter((u) => (articles ?? []).some((a) => a.url === u && a.via === 'link')), ...(readable.length ? readable : list.slice(0, 3)).map((a) => a.url)]));
       if (!list.length) setError('Nenhuma notícia encontrada. Tente outras palavras (nome da cidade, do bairro, da operação...).');
     } catch (e) {
       setError((e as Error).message);
@@ -138,6 +144,32 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
       else setError('Não foi possível escrever a partir dessas notícias.');
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** usa um ou mais links colados (de qualquer portal) como fonte, pra escrever "inspirado neles" */
+  const useLinks = async () => {
+    const urls = links.split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!urls.length) return;
+    setBusy('links');
+    setLinksErr(null);
+    try {
+      const { articles: found, falhas } = await findFromLinks(urls);
+      if (found.length) {
+        setArticles((cur) => {
+          const base = cur ?? [];
+          const semDuplicata = found.filter((a) => !base.some((b) => b.url === a.url));
+          return [...semDuplicata, ...base];
+        });
+        setPicked((s) => new Set([...s, ...found.map((a) => a.url)]));
+        setLinks('');
+      }
+      if (falhas.length) setLinksErr(falhas.join(' · '));
+      if (!found.length && !falhas.length) setLinksErr('Nenhum link válido.');
+    } catch (e) {
+      setLinksErr((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -180,6 +212,25 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
 
         {error && <p className="error-text">{error}</p>}
 
+        <label className="field">
+          <span>Ou cole o link de uma ou mais matérias (de qualquer portal, um por linha) para se inspirar</span>
+          <div className="post-search">
+            <textarea
+              className="input post-links"
+              rows={2}
+              value={links}
+              placeholder={'https://...\nhttps://...'}
+              onChange={(e) => setLinks(e.target.value)}
+              data-testid="post-links"
+            />
+            <button className="btn" onClick={() => void useLinks()} disabled={!!busy || !links.trim()} data-testid="post-links-add">
+              {busy === 'links' ? 'Lendo…' : 'Usar estes links'}
+            </button>
+          </div>
+          <span className="small muted">Funciona sozinho ou junto da busca por palavras-chave acima — os dois juntam na mesma lista.</span>
+          {linksErr && <span className="error-text small">{linksErr}</span>}
+        </label>
+
         {plan && (
           <p className="small muted" data-testid="post-plan">
             Entendi como: <strong>{plan.queries.join(' · ')}</strong> — {plan.year ? `notícias de ${plan.year}` : WINDOW_LABEL[plan.used]}
@@ -202,6 +253,7 @@ export function PostDialog({ onClose, videoFile, initialQuery }: { onClose: () =
                     {a.source}
                     {a.date ? ` · ${new Date(a.date).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} (${ago(a.date)})` : ' · sem data'}
                     {a.readable ? ' · texto completo' : ' · só manchete'}
+                    {a.via === 'link' ? ' · link colado' : ''}
                   </span>
                   {a.snippet && <span className="small">{a.snippet}</span>}
                   <a href={a.url} target="_blank" rel="noreferrer" className="small" onClick={(e) => e.stopPropagation()}>
