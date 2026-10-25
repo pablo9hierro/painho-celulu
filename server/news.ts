@@ -75,14 +75,15 @@ export function registerNews(app: Express, json: (req: Request, res: Response, n
   });
 
   app.post('/api/news/write', json, async (req, res) => {
-    const body = req.body as { query?: string; articles?: Article[]; prompt?: string; apiKey?: string };
+    const body = req.body as { query?: string; articles?: Article[]; prompt?: string; apiKey?: string; tamanho?: 'resumido' | 'normal' | 'completo' };
     const articles = (body.articles ?? []).slice(0, 8);
     if (!articles.length) return res.status(400).json({ error: 'Escolha ao menos uma notícia.' });
     try {
       // lê o texto das matérias (as que têm link direto), em paralelo
       const texts = await Promise.all(articles.map((a) => (a.readable ? fetchArticle(a, nodeHttp) : Promise.resolve({ url: a.url, title: a.title, source: a.source, date: a.date, text: a.snippet }))));
       const k = body.apiKey?.trim() || key();
-      const story = await writeStory(String(body.query ?? ''), texts, aiChat(k), String(body.prompt ?? '').slice(0, 1000));
+      const tam = body.tamanho === 'resumido' || body.tamanho === 'completo' ? body.tamanho : 'normal';
+      const story = await writeStory(String(body.query ?? ''), texts, aiChat(k), String(body.prompt ?? '').slice(0, 1000), tam);
       const result = await withTrendingHashtags(story, texts, nodeHttp);
       res.json({ ...result, sources: texts.map((t) => ({ url: t.url, title: t.title, source: t.source, chars: t.text.length })) });
     } catch (e) {

@@ -20,6 +20,10 @@ import { ensureTrackMedia } from '../news/defaultTones';
 
 export const STORY_FRAME = 'central';
 export const STORY_SECONDS = 15;
+/** a foto entra quando a moldura e a manchete já estão chegando (tudo junto) */
+const INTRO_S = 0.35;
+/** transição entre as fotos do slide */
+const CROSS_S = 0.5;
 
 export interface StoryVideoInput {
   kicker: string;
@@ -31,6 +35,8 @@ export interface StoryVideoInput {
   photo?: File | null;
   /** vídeo da matéria (baixado): entra no lugar da foto, sem o som original */
   video?: File | null;
+  /** mais fotos da matéria (sem vídeo): vira slide com transição */
+  morePhotos?: File[];
   format?: FormatId;
   /** segundos */
   duration?: number;
@@ -43,9 +49,10 @@ export interface StoryVideoInput {
 
 /** Monta o projeto (sem enviar nada): usado pelo app e pela automação. */
 export function buildStoryProject(
-  input: Omit<StoryVideoInput, 'photo' | 'video' | 'audioId'>,
+  input: Omit<StoryVideoInput, 'photo' | 'video' | 'audioId' | 'morePhotos'>,
   photo: Pick<MediaAsset, 'id' | 'name' | 'width' | 'height'> | MediaAsset | null,
   audio: MediaAsset | null,
+  extras: MediaAsset[] = [],
 ): Project {
   const format = input.format ?? 'reel';
   let duration = Math.max(5, Math.min(20, input.duration ?? (audio ? input.audioDur : undefined) ?? STORY_SECONDS));
@@ -63,17 +70,37 @@ export function buildStoryProject(
     const mk = (): VisualClip => (isVideo ? { ...createVideoClip(p, m, 0), volume: 0, muted: true } : createImageClip(p, m, 0));
     const img = mk();
     const ratio = (m.width || 16) / (m.height || 9);
+    // várias fotos (sem vídeo): slide, cada uma com seu tempo e transição suave
+    const slides = isVideo ? [] : extras.filter((x) => x.status === 'ready' && x.kind === 'image').slice(0, 2);
+    const fatia = duration / (1 + slides.length);
     // cobre a janela da moldura; o que sobra fica escondido atrás do fundo da moldura
     const start = coverWindow(def, p.width, p.height, ratio);
     img.transform = start;
-    img.duration = duration;
+    // entra junto com a moldura e a manchete (antes ficava sozinha na tela enquanto o resto subia)
+    img.start = INTRO_S;
+    img.duration = (slides.length ? fatia + CROSS_S : duration) - INTRO_S;
+    img.animIn = { type: 'fade', duration: 0.45 };
     // aproximação lenta (Pan/Crop), sem mexer a câmera pros lados
     const end = { ...start, width: start.width * 1.07, height: start.height * 1.07 };
     img.keyframes = [
       { ...start, t: 0, easing: 'linear' },
-      { ...end, t: duration, easing: 'linear' },
+      { ...end, t: img.duration, easing: 'linear' },
     ];
     p = placeClip(p, img, visual?.id);
+    slides.forEach((s, i) => {
+      const c = createImageClip(p, s, 0);
+      const st = coverWindow(def, p.width, p.height, (s.width || 16) / (s.height || 9));
+      c.start = fatia * (i + 1);
+      c.duration = i === slides.length - 1 ? duration - c.start : fatia + CROSS_S;
+      c.transform = st;
+      c.animIn = { type: 'fade', duration: CROSS_S };
+      const fim = { ...st, width: st.width * 1.07, height: st.height * 1.07 };
+      c.keyframes = [
+        { ...st, t: 0, easing: 'linear' },
+        { ...fim, t: c.duration, easing: 'linear' },
+      ];
+      p = placeClip(p, c);
+    });
     // foto em pé, quadrada ou panorâmica: a cobertura cortaria demais. Fica
     // inteira na janela, sobre a própria foto desfocada preenchendo o fundo.
     if (ratio < 1.15 || ratio > 2.1) {
@@ -133,6 +160,19 @@ export async function createStoryVideo(input: StoryVideoInput): Promise<string> 
     photo = await waitReady(up.id);
     if (photo.status !== 'ready') throw new Error(photo.error ?? 'Não foi possível processar a foto.');
   }
+  // mais fotos (sem vídeo): slide
+  const extras: MediaAsset[] = [];
+  if (photo && photo.kind === 'image') {
+    for (const f of (input.morePhotos ?? []).slice(0, 2)) {
+      try {
+        const up = await mediaApi.upload(f);
+        const m = await waitReady(up.id);
+        if (m.status === 'ready') extras.push(m);
+      } catch {
+        /* foto extra não abriu: segue sem ela */
+      }
+    }
+  }
   let audio: MediaAsset | null = null;
   if (input.audioId) {
     // música do app entra na biblioteca agora (uma vez); se não der, NÃO monta sem música
@@ -140,7 +180,7 @@ export async function createStoryVideo(input: StoryVideoInput): Promise<string> 
     audio = await mediaApi.get(id).catch(() => null);
     if (!audio || audio.status !== 'ready') throw new Error('A música escolhida não carregou; o post não foi montado sem música.');
   }
-  const p = buildStoryProject(input, photo, audio);
+  const p = buildStoryProject(input, photo, audio, extras);
   await projects.create(p);
   return p.id;
 }

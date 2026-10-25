@@ -70,6 +70,7 @@ export function PostDialog({ onClose, videoFile, video, initialQuery }: { onClos
   const [plan, setPlan] = useState<NewsPlan | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [prompt, setPrompt] = useState('');
+  const [resumido, setResumido] = useState(false);
   const [text, setText] = useState(saved.text);
   const [info, setInfo] = useState<WriteResult | null>(null);
   const [busy, setBusy] = useState<'search' | 'write' | 'links' | null>(null);
@@ -139,7 +140,7 @@ export function PostDialog({ onClose, videoFile, video, initialQuery }: { onClos
     setBusy('write');
     setError(null);
     try {
-      const r = await writeFromNews(query, chosen, prompt);
+      const r = await writeFromNews(query, chosen, prompt, resumido ? 'resumido' : 'completo');
       setInfo(r);
       if (r.costUsd) {
         setCost((c) => ({ ...c, write: c.write + r.costUsd }));
@@ -295,6 +296,9 @@ export function PostDialog({ onClose, videoFile, video, initialQuery }: { onClos
                 <span className="muted small">Sem a chave, o app monta um rascunho simples a partir das manchetes.</span>
               </div>
             )}
+            <label className="check small" data-testid="post-tamanho">
+              <input type="checkbox" checked={resumido} onChange={(e) => setResumido(e.target.checked)} data-testid="post-resumido" /> Resumido (todos os dados, direto ao ponto). Sem marcar: matéria completa, no estilo das matérias do site.
+            </label>
             <button className="btn primary wide" onClick={() => void write()} disabled={!!busy || picked.size === 0} data-testid="post-write">
               {busy === 'write' ? 'Lendo as matérias, escrevendo e conferindo os dados…' : 'Escrever matéria'}
             </button>

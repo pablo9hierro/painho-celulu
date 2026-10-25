@@ -14,6 +14,7 @@ import { setSpeed, trimEnd } from '../../core/timeline';
 import { getEditor, setAutoKey, useEditor } from '../../state/store';
 import { deleteKeyframe, detachAudio, fitSelection, removeImageBackground, resetClip } from '../commands';
 import { IconClose, IconKeyframe } from '../icons';
+import { generateCaptionsForClip } from '../captions';
 
 export function Inspector({ onClose }: { onClose: () => void }) {
   const project = useEditor((s) => s.project)!;
@@ -42,6 +43,7 @@ export function Inspector({ onClose }: { onClose: () => void }) {
       {clip.type === 'shape' && <ShapeSection clip={clip} />}
       {(clip.type === 'video' || clip.type === 'audio') && <SpeedSection clip={clip} />}
       {(clip.type === 'video' || clip.type === 'audio') && <AudioSection clip={clip} />}
+      {(clip.type === 'video' || clip.type === 'audio') && <CaptionClipSection clip={clip} />}
       {isVisual(clip) && clip.type !== 'frame' && <TransformSection clip={clip} time={time} />}
       <TimingSection clip={clip} />
     </div>
@@ -359,6 +361,37 @@ function CropControls({ clip }: { clip: VideoClip | ImageClip }) {
       </div>
       {on && <p className="hint">Arraste as alças das bordas (em cima, embaixo, esquerda e direita) no vídeo para cortar.</p>}
     </div>
+  );
+}
+
+/** Legenda só deste trecho: um bloco do tamanho dele, agrupado (andam juntos) */
+function CaptionClipSection({ clip }: { clip: Extract<Clip, { type: 'video' | 'audio' }> }) {
+  const notify = useEditor((s) => s.notify);
+  const temLegenda = useEditor((s) => !!clip.group && !!s.project?.clips.some((c) => c.type === 'text' && c.preset === 'pn-legenda' && c.group === clip.group));
+  const [passo, setPasso] = useState<string | null>(null);
+  if (clip.type === 'video' && !clip.hasAudio) return null;
+  return (
+    <Section title="Legenda">
+      <p className="hint">Transcreve só este trecho e cria um bloco de legenda do mesmo tamanho, ligado a ele (o estilo é o de Manchetes → Legendas automáticas).</p>
+      <button
+        className="btn primary wide"
+        disabled={!!passo}
+        onClick={async () => {
+          setPasso('Começando…');
+          try {
+            const r = await generateCaptionsForClip(clip.id, setPasso);
+            notify(`Legenda deste trecho criada (${r.frases} frase${r.frases === 1 ? '' : 's'}).`);
+          } catch (e) {
+            notify((e as Error).message, 'error');
+          } finally {
+            setPasso(null);
+          }
+        }}
+        data-testid="insp-caption-clip"
+      >
+        {passo ?? (temLegenda ? 'Gerar de novo a legenda deste trecho' : 'Gerar legenda deste trecho')}
+      </button>
+    </Section>
   );
 }
 

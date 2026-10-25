@@ -24,6 +24,7 @@ import {
   stopPlayback,
   togglePlay,
 } from './commands';
+import { toggleGroup, withGroups } from '../core/timeline';
 import { importFiles, loadAllMedia } from './importer';
 import { useBackHandler } from '../platform/backButton';
 import { applyFrameLogos } from './frameLogos';
@@ -225,6 +226,10 @@ export function Editor({ projectId }: { projectId: string }) {
       } else if ((mod && k === 'z' && e.shiftKey) || (mod && k === 'y')) {
         e.preventDefault();
         s.redo();
+      } else if (mod && k === 'g') {
+        // Ctrl+G agrupa; com um grupo selecionado, desagrupa (como no Vegas/CapCut)
+        e.preventDefault();
+        s.apply((p) => toggleGroup(p, withGroups(p, s.selection)));
       } else if (mod && k === 'd') {
         e.preventDefault();
         duplicateSelection();

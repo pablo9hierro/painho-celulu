@@ -129,7 +129,7 @@ test('Postador: aba do site guarda o acesso e explica quando falta senha', async
   await expect(page.getByText(/Acesso OK|usuário e a senha|recusado|painel/).first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('postador-tab-auto')).toBeVisible();
   await page.getByTestId('postador-tab-auto').click();
-  await expect(page.getByTestId('auto-box')).toContainText('De manhã, às 7h');
+  await expect(page.getByTestId('auto-box')).toContainText('De manhã, às 6h');
   await expect(page.getByText(/No PC é só para ver como fica/)).toBeVisible();
 });
 
@@ -142,9 +142,9 @@ test('Automação simples: um botão liga/desliga; lote do blog de manhã e Inst
   await sw.click();
   await expect(sw).toContainText('LIGADO');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(true);
-  await expect(page.getByTestId('auto-box')).toContainText('De manhã, às 7h');
-  await expect(page.getByText(/mais visualizações/)).toBeVisible();
-  await expect(page.locator('b').filter({ hasText: /\d\d:\d\d/ }).first()).toBeVisible();
+  await expect(page.getByTestId('auto-box')).toContainText('De manhã, às 6h');
+  // Instagram é manual agora: ranking + quantidade + Postar lote
+  await expect(page.getByTestId('ig-rank-load')).toBeVisible();
   await sw.click();
   await expect(sw).toContainText('DESLIGADO');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pn-autopost-cfg') ?? '{}').ativo)).toBe(false);
@@ -262,11 +262,12 @@ test('Instagram: lista das matérias publicadas com botão para postar na mão (
   await page.getByTestId('postador-tab-auto').click();
   await page.getByTestId('ig-list-load').click();
   const items = page.getByTestId('ig-item');
-  await expect(items).toHaveCount(2); // a em revisão fica de fora
+  await expect(items).toHaveCount(3); // todas aparecem, com o status de cada uma
   await expect(items.nth(0)).toContainText('820 visualizações');
   await expect(items.nth(0).getByTestId('ig-post')).toBeVisible();
   await expect(items.nth(1)).toContainText('✓ no Instagram');
   await expect(items.nth(1).getByTestId('ig-post')).toHaveCount(0);
+  await expect(items.nth(2)).toContainText('Revisão');
   await page.evaluate(() => ['pn-websg', 'pn-autopost-state'].forEach((k) => localStorage.removeItem(k)));
 });
 

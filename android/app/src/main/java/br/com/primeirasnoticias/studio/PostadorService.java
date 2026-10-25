@@ -78,11 +78,14 @@ public class PostadorService extends Service {
         }
         handler.removeCallbacks(tick);
         handler.postDelayed(tick, 15_000);
+        // alarme exato às 6h (o temporizador comum pode parar no modo de economia)
+        PostadorAlarm.agendar(this);
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        PostadorAlarm.cancelar(this);
         running = false;
         handler.removeCallbacks(tick);
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();

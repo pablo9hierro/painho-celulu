@@ -284,6 +284,15 @@ export async function fetchArticle(a: Pick<Article, 'url' | 'title' | 'source' |
     const paras = (scope.match(/<p[\s>][\s\S]*?<\/p>/gi) ?? [])
       .map(stripTags)
       .filter((p) => p.length >= 50 && !JUNK.test(p));
+    // texto separado por <br><br> em vez de <p> (alguns portais regionais)
+    if (paras.length < 2) {
+      const br = scope
+        .replace(/<(script|style|figure|figcaption|ul|ol|nav|aside|header|footer)[\s\S]*?<\/\1>/gi, ' ')
+        .split(/(?:<br\s*\/?>\s*){2,}/i)
+        .map(stripTags)
+        .filter((p) => p.length >= 50 && !JUNK.test(p));
+      if (br.length >= 2) paras.push(...br);
+    }
     const desc = meta('og:description') || meta('description');
     let text = [desc, ...paras].filter(Boolean).join('\n');
     if (text.length > 6000) text = text.slice(0, 6000);

@@ -7,6 +7,11 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent a
 import type { Clip, MediaAsset, Project, Track } from '../../core/model';
 import {
   addTrack,
+  closeGaps,
+  insertTrackNear,
+  overlapping,
+  toggleGroup,
+  withGroups,
   clipEnd,
   moveClip,
   moveTrack,
@@ -34,6 +39,7 @@ import {
   IconMagnet,
   IconMute,
   IconPlus,
+  IconMic,
   IconSplit,
   IconTrash,
   IconUnlock,
@@ -57,10 +63,13 @@ type Gesture =
       kind: 'move';
       id: string;
       x0: number;
+      y0: number;
       /** scrollLeft no início — a timeline pode rolar sozinha durante o gesto */
       sl0: number;
       bases: { id: string; start: number; trackId: string; duration: number }[];
       moved: boolean;
+      /** onde vai cair ao soltar: faixa livre, trocar com outro item, ou faixa nova */
+      alvo?: { tipo: 'faixa'; trackId: string } | { tipo: 'troca'; trackId: string; outroId: string } | { tipo: 'nova'; refTrackId: string; acima: boolean };
     }
   | { kind: 'trim'; id: string; edge: 'l' | 'r'; x0: number; sl0: number; start: number; end: number };
 
@@ -81,6 +90,9 @@ export function Timeline() {
   const [view, setView] = useState({ left: 0, width: 800 });
   const [headW, setHeadW] = useState(132);
   const [snapAt, setSnapAt] = useState<number | null>(null);
+  /** aviso visual do que acontece ao soltar (trocar de lugar / faixa nova) */
+  const [dropHint, setDropHint] = useState<{ tipo: 'troca' | 'nova'; trackId: string; acima: boolean } | null>(null);
+  const fechaVaos = useEditor((s) => s.fechaVaos);
   const gesture = useRef<Gesture | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
@@ -227,8 +239,10 @@ export function Timeline() {
         kind: 'move',
         id,
         x0: e.clientX,
+        y0: e.clientY,
         sl0,
-        bases: s.project!.clips.filter((c) => sel.includes(c.id)).map((c) => ({ id: c.id, start: c.start, trackId: c.trackId, duration: c.duration })),
+        // itens agrupados (Ctrl+G, legenda ligada ao vídeo) andam juntos
+        bases: s.project!.clips.filter((c) => withGroups(s.project!, sel).includes(c.id)).map((c) => ({ id: c.id, start: c.start, trackId: c.trackId, duration: c.duration })),
         moved: false,
       };
       startAutoScroll();
@@ -315,7 +329,8 @@ export function Timeline() {
       }
       case 'move': {
         const dxT = (clientX - g.x0 + scrolled) / s.zoom;
-        if (!g.moved && Math.abs(clientX - g.x0) < 3 && scrolled === 0) return;
+        // vale arrastar para os lados OU para cima/baixo (trocar de faixa)
+        if (!g.moved && Math.hypot(clientX - g.x0, clientY - g.y0) < 4 && scrolled === 0) return;
         g.moved = true;
         const prim = g.bases.find((b) => b.id === g.id)!;
         const ids = g.bases.map((b) => b.id);
@@ -332,15 +347,39 @@ export function Timeline() {
         } else setSnapAt(null);
         const delta = start - prim.start;
         const hoverTrack = trackUnder(clientX, clientY);
+        const primClip = s.project!.clips.find((c) => c.id === g.id)!;
+        const kind = trackKindFor(primClip);
+        const ids2 = g.bases.map((b) => b.id);
+        // acima de todas as faixas (ou abaixo de todas): faixa nova ao soltar
+        const rowsEls = [...scrollRef.current!.querySelectorAll<HTMLElement>('.tl-lane[data-track]')];
+        const first = rowsEls[0]?.getBoundingClientRect();
+        const last = rowsEls[rowsEls.length - 1]?.getBoundingClientRect();
+        g.alvo = undefined;
+        if (!hoverTrack && first && clientY < first.top && kind === 'visual') {
+          const topo = [...s.project!.tracks].filter((x) => x.kind === 'visual').pop();
+          if (topo) g.alvo = { tipo: 'nova', refTrackId: topo.id, acima: true };
+        } else if (!hoverTrack && last && clientY > last.bottom && kind === 'audio') {
+          const fim = [...s.project!.tracks].filter((x) => x.kind === 'audio').pop();
+          if (fim) g.alvo = { tipo: 'nova', refTrackId: fim.id, acima: false };
+        } else if (hoverTrack) {
+          const tr = s.project!.tracks.find((x) => x.id === hoverTrack);
+          if (tr && tr.kind === kind && !tr.locked) {
+            if (tr.id === prim.trackId) g.alvo = { tipo: 'faixa', trackId: tr.id };
+            else {
+              const quem = overlapping(s.project!, tr.id, start, prim.duration, ids2);
+              if (!quem.length) g.alvo = { tipo: 'faixa', trackId: tr.id };
+              else if (quem.length === 1 && !quem[0]!.group) g.alvo = { tipo: 'troca', trackId: tr.id, outroId: quem[0]!.id };
+              else g.alvo = { tipo: 'nova', refTrackId: tr.id, acima: kind === 'visual' };
+            }
+          }
+        }
+        const a = g.alvo;
+        setDropHint(a && a.tipo !== 'faixa' ? { tipo: a.tipo, trackId: a.tipo === 'troca' ? a.trackId : a.refTrackId, acima: a.tipo === 'nova' ? a.acima : false } : null);
         s.updateGesture((base) => {
           let p = base;
           for (const b of g.bases) {
-            const clip = base.clips.find((c) => c.id === b.id)!;
-            let trackId = b.trackId;
-            if (b.id === g.id && hoverTrack) {
-              const t = base.tracks.find((x) => x.id === hoverTrack);
-              if (t && t.kind === trackKindFor(clip) && !t.locked) trackId = t.id;
-            }
+            // só muda de faixa ao vivo quando ela está livre; troca/faixa nova acontece ao soltar
+            const trackId = b.id === g.id && a?.tipo === 'faixa' ? a.trackId : b.trackId;
             p = moveClip(p, b.id, Math.max(0, b.start + delta), trackId);
           }
           return p;
@@ -373,7 +412,30 @@ export function Timeline() {
     if (pointers.current.size > 0) return;
     if (g?.kind === 'move' || g?.kind === 'trim') {
       if (cancelled) s.cancelGesture();
-      else s.endGesture();
+      else {
+        if (g.kind === 'move' && g.moved && g.alvo && g.alvo.tipo !== 'faixa') {
+          const alvo = g.alvo;
+          const prim = g.bases.find((b) => b.id === g.id)!;
+          s.updateGesture((base) => {
+            const cur = base.clips.find((c) => c.id === g.id);
+            if (!cur) return base;
+            if (alvo.tipo === 'troca') {
+              // os dois trocam de faixa (cada um mantém o seu tempo)
+              const outro = base.clips.find((c) => c.id === alvo.outroId);
+              if (!outro) return base;
+              const p1 = { ...base, clips: base.clips.map((c) => (c.id === outro.id ? { ...c, trackId: prim.trackId } : c.id === cur.id ? { ...c, trackId: alvo.trackId } : c)) };
+              return p1;
+            }
+            // abre uma faixa só para ele (só agora, ao soltar)
+            const ref = alvo.acima ? alvo.refTrackId : alvo.refTrackId;
+            const r = insertTrackNear(base, ref, base.tracks.find((x) => x.id === ref)!.kind);
+            return { ...r.project, clips: r.project.clips.map((c) => (c.id === cur.id ? { ...c, trackId: r.trackId } : c)) };
+          });
+        }
+        if (s.fechaVaos) s.updateGesture((base) => closeGaps(base));
+        s.endGesture();
+      }
+      setDropHint(null);
     } else if (g?.kind === 'pan' && !g.moved && !cancelled && g.t >= 0) {
       s.select([]);
       seek(g.t);
@@ -457,6 +519,31 @@ export function Timeline() {
         >
           <IconPlus />
         </button>
+        <button
+          className="btn sm"
+          disabled={selection.length < 1 || (selection.length < 2 && !project.clips.find((c) => c.id === selection[0])?.group)}
+          onClick={() => getEditor().apply((p) => toggleGroup(p, withGroups(p, selection)))}
+          title="Agrupar (Ctrl+G): os itens andam juntos. Com um grupo selecionado, desagrupa."
+          data-testid="tl-group"
+        >
+          {selection.length && project.clips.filter((c) => selection.includes(c.id)).every((c, _i, arr) => c.group && c.group === arr[0]!.group) ? 'Desagrupar' : 'Agrupar'}
+        </button>
+        <button
+          className={`btn sm ${fechaVaos ? 'primary' : ''}`}
+          onClick={() => {
+            const s = getEditor();
+            s.set('fechaVaos', !fechaVaos);
+            if (!fechaVaos) s.apply((p) => closeGaps(p));
+          }}
+          title="Juntar trechos: tira os espaços vazios entre os vídeos (e continua tirando depois de mover, cortar ou apagar)"
+          aria-pressed={fechaVaos}
+          data-testid="tl-gaps"
+        >
+          Juntar trechos
+        </button>
+        <button className="icon-btn" onClick={() => getEditor().set('panel', 'ia')} title="Editar por voz (IA)" aria-label="Editar por voz" data-testid="tl-voz">
+          <IconMic />
+        </button>
         <div className="tl-spacer" />
         <button className="icon-btn" onClick={fit} title="Ajustar a timeline à tela" aria-label="Ajustar">
           <IconFit />
@@ -514,6 +601,7 @@ export function Timeline() {
 
           <Playhead headW={headW} />
           {snapAt !== null && <div className="snap-line" style={{ left: headW + snapAt * zoom }} />}
+          {dropHint && <DropHint hint={dropHint} />}
         </div>
         {project.clips.length === 0 && <div className="tl-empty">Importe um vídeo pelo painel Mídia ou arraste arquivos para cá</div>}
       </div>
@@ -624,6 +712,8 @@ const TrackRow = memo(function TrackRow({
     getEditor().apply((p) => ({ ...p, tracks: p.tracks.map((t) => (t.id === track.id ? { ...t, [key]: !t[key] } : t)) }));
   const removeTrack = () => getEditor().apply((p) => ({ ...p, tracks: p.tracks.filter((t) => t.id !== track.id) }));
   const sameKind = project.tracks.filter((t) => t.kind === track.kind).length;
+  const [volOpen, setVolOpen] = useState(false);
+  const setVol = (v: number) => getEditor().apply((p) => ({ ...p, tracks: p.tracks.map((t) => (t.id === track.id ? { ...t, volume: v } : t)) }), `trackvol-${track.id}`);
 
   return (
     <div className={`tl-row ${track.kind} ${isMain ? 'main' : ''} ${track.locked ? 'locked' : ''}`} style={{ height: h }}>
@@ -638,8 +728,23 @@ const TrackRow = memo(function TrackRow({
             </button>
           ) : null}
           {(track.kind === 'audio' || isMain) && (
-            <button className="mini-btn" onClick={() => toggle('muted')} aria-label={track.muted ? 'Ativar som' : 'Silenciar'} title={track.muted ? 'Ativar som' : 'Silenciar'}>
+            <button
+              className="mini-btn"
+              onClick={() => toggle('muted')}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setVolOpen((v) => !v);
+              }}
+              aria-label={track.muted ? 'Ativar som' : 'Silenciar'}
+              title={track.muted ? 'Ativar som' : 'Silenciar (segure ou clique com o botão direito: volume)'}
+              data-testid="tl-mute"
+            >
               {track.muted ? <IconMute /> : <IconVolume />}
+            </button>
+          )}
+          {(track.kind === 'audio' || isMain) && (
+            <button className="mini-btn" onClick={() => setVolOpen((v) => !v)} aria-label="Volume da faixa" title="Volume da faixa" data-testid="tl-vol">
+              {Math.round((track.volume ?? 1) * 100)}
             </button>
           )}
           <button className="mini-btn hide-sm" onClick={() => toggle('locked')} aria-label={track.locked ? 'Destravar' : 'Travar'} title={track.locked ? 'Destravar' : 'Travar'}>
@@ -657,6 +762,14 @@ const TrackRow = memo(function TrackRow({
           )}
         </div>
       </div>
+      {volOpen && (
+        <div className="tl-vol-pop" data-testid="tl-vol-pop">
+          <span className="small">Volume</span>
+          <input type="range" min={0} max={2} step={0.05} value={track.volume ?? 1} onChange={(e) => setVol(Number(e.target.value))} aria-label="Volume da faixa" />
+          <b className="small">{Math.round((track.volume ?? 1) * 100)}%</b>
+          <button className="mini-btn" onClick={() => setVolOpen(false)} aria-label="Fechar">×</button>
+        </div>
+      )}
       <div className="tl-lane" data-track={track.id} style={{ width: laneW }}>
         {clips.map((c) => {
           const x0 = c.start * zoom;
@@ -669,6 +782,24 @@ const TrackRow = memo(function TrackRow({
     </div>
   );
 });
+
+/** onde o item vai cair: troca de lugar ou faixa nova */
+function DropHint({ hint }: { hint: { tipo: 'troca' | 'nova'; trackId: string; acima: boolean } }) {
+  const [box, setBox] = useState<{ top: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = document.querySelector<HTMLElement>(`.tl-lane[data-track="${hint.trackId}"]`);
+    const row = el?.parentElement;
+    if (row) setBox({ top: row.offsetTop, h: row.offsetHeight });
+  }, [hint.trackId, hint.tipo]);
+  if (!box) return null;
+  return hint.tipo === 'troca' ? (
+    <div className="tl-drop troca" style={{ top: box.top, height: box.h }}>trocar de lugar</div>
+  ) : (
+    <div className="tl-drop nova" style={{ top: hint.acima ? box.top - 3 : box.top + box.h - 3 }}>
+      <span>nova faixa</span>
+    </div>
+  );
+}
 
 const TYPE_LABEL: Record<Clip['type'], string> = {
   video: 'Vídeo',
@@ -710,6 +841,7 @@ const ClipView = memo(function ClipView({
       data-clip={clip.id}
       data-testid={`clip-${clip.type}`}
     >
+      {clip.group && <span className="clip-group-badge" title="Agrupado: anda junto com outros itens">🔗</span>}
       {clip.type === 'video' && asset?.thumbs && <Filmstrip clip={clip} asset={asset} zoom={zoom} width={w} height={height - 6} />}
       {clip.type === 'image' && asset && <div className="clip-image-bg" style={{ backgroundImage: `url(${asset.url})` }} />}
       {(clip.type === 'audio' || (clip.type === 'video' && clip.hasAudio)) && asset?.waveform && (

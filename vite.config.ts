@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [react()],
   // som do encerramento embutido no app
   assetsInclude: ['**/*.m4a'],
+  // sincronizador de legenda (Whisper no aparelho) roda num worker com módulos
+  worker: { format: 'es' },
+  optimizeDeps: { exclude: ['@huggingface/transformers'] },
   server: {
     port: 5173,
     strictPort: true,

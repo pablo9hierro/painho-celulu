@@ -303,3 +303,64 @@ export function moveTrack(p: Project, trackId: string, dir: -1 | 1): Project {
   [tracks[idx], tracks[j]] = [tracks[j]!, tracks[idx]!];
   return { ...p, tracks };
 }
+
+// ---------------------------------------------------------------------------
+// Grupos (Ctrl+G), vácuos e faixa nova ao arrastar
+// ---------------------------------------------------------------------------
+
+/** Ids de todos os itens que andam junto com estes (mesmo grupo). */
+export function withGroups(p: Project, ids: string[]): string[] {
+  const groups = new Set(p.clips.filter((c) => ids.includes(c.id) && c.group).map((c) => c.group!));
+  return [...new Set([...ids, ...p.clips.filter((c) => c.group && groups.has(c.group)).map((c) => c.id)])];
+}
+
+/** Agrupa (2+ itens) ou desagrupa (se já estão todos no mesmo grupo). */
+export function toggleGroup(p: Project, ids: string[]): Project {
+  const sel = p.clips.filter((c) => ids.includes(c.id));
+  if (!sel.length) return p;
+  const same = sel.every((c) => c.group && c.group === sel[0]!.group);
+  if (same) {
+    const g = sel[0]!.group;
+    return { ...p, clips: p.clips.map((c) => (c.group === g ? { ...c, group: undefined } : c)) };
+  }
+  if (sel.length < 2) return p;
+  const g = uid();
+  return { ...p, clips: p.clips.map((c) => (ids.includes(c.id) ? { ...c, group: g } : c)) };
+}
+
+/**
+ * Tira os vácuos: trechos de tempo em que NENHUMA faixa tem vídeo, foto ou
+ * áudio. Tudo que vem depois anda para a esquerda. Um trecho que continua em
+ * outra faixa (0–10 s numa, 10–15 s na outra) não tem vácuo e não se mexe.
+ */
+export function closeGaps(p: Project): Project {
+  const cover = p.clips
+    .filter((c) => c.type === 'video' || c.type === 'image' || c.type === 'audio')
+    .map((c) => [c.start, clipEnd(c)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  if (!cover.length) return p;
+  const gaps: [number, number][] = [];
+  let end = 0;
+  for (const [a, b] of cover) {
+    if (a > end + 0.01) gaps.push([end, a]);
+    end = Math.max(end, b);
+  }
+  if (!gaps.length) return p;
+  const shift = (t: number) => gaps.reduce((s, [a, b]) => (t >= b - 1e-6 ? s + (b - a) : s), 0);
+  return { ...p, clips: p.clips.map((c) => ({ ...c, start: Math.max(0, c.start - shift(c.start)) })) };
+}
+
+/** Itens (fora `ignore`) que ocupariam o mesmo tempo nesta faixa. */
+export function overlapping(p: Project, trackId: string, start: number, duration: number, ignore: string[]): Clip[] {
+  return p.clips.filter((c) => c.trackId === trackId && !ignore.includes(c.id) && c.start < start + duration - EPS && clipEnd(c) > start + EPS);
+}
+
+/** Cria uma faixa logo acima (visual) ou logo abaixo (áudio) desta e devolve o id. */
+export function insertTrackNear(p: Project, refTrackId: string, kind: Track['kind']): { project: Project; trackId: string } {
+  const count = p.tracks.filter((t) => t.kind === kind).length;
+  const t = newTrack(kind, kind === 'visual' ? `Camada ${count + 1}` : `Áudio ${count + 1}`);
+  const idx = p.tracks.findIndex((x) => x.id === refTrackId);
+  const tracks = [...p.tracks];
+  tracks.splice(idx < 0 ? tracks.length : idx + 1, 0, t);
+  return { project: { ...p, tracks }, trackId: t.id };
+}

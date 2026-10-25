@@ -1,5 +1,6 @@
 /** Rotas do Postador no PC: captura e ranking de pautas (com conferência de imagens). */
 import type { Express, Request, Response } from 'express';
+import { enrichPauta } from '../src/news/enrich';
 import { writeSiteStory, type ToneOption } from '../src/news/siteWriter';
 import type { Pauta } from '../src/news/pautas';
 import { capturePautas, type PautaHttp } from '../src/news/pautas';
@@ -86,8 +87,10 @@ export function registerPautas(app: Express, json: (req: Request, res: Response,
     if (!body.pauta?.url) return res.status(400).json({ error: 'Escolha uma pauta.' });
     try {
       const k = body.apiKey?.trim() || key();
-      const story = await writeSiteStory(body.pauta, aiChat(k), String(body.prompt ?? '').slice(0, 1000), (body.tones ?? []).slice(0, 30));
-      res.json(story);
+      const steps: string[] = [];
+      const rica = await enrichPauta(body.pauta, nodeHttp, steps);
+      const story = await writeSiteStory(rica, aiChat(k), String(body.prompt ?? '').slice(0, 1000), (body.tones ?? []).slice(0, 30));
+      res.json({ ...story, steps: [...steps, ...story.steps] });
     } catch (e) {
       res.status(500).json({ error: `Falha ao escrever: ${(e as Error).message}` });
     }
@@ -121,7 +124,7 @@ export function registerPautas(app: Express, json: (req: Request, res: Response,
     }
   };
   app.post('/api/site/test', json, site(async (_b, c) => ({ ok: true, total: (await listNews(session(c), c, 1)).length })));
-  app.post('/api/site/list', json, site(async (b, c) => ({ news: await searchNews(session(c), c, String(b.q ?? '').slice(0, 200), 3) })));
+  app.post('/api/site/list', json, site(async (b, c) => ({ news: await searchNews(session(c), c, String(b.q ?? '').slice(0, 200), Math.min(8, Math.max(1, Number(b.pages) || 3))) })));
   app.post('/api/site/delete', json, site(async (b, c) => {
     await deleteNews(session(c), c, Number(b.id));
     return { ok: true };

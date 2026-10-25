@@ -49,7 +49,7 @@ REGRAS OBRIGATÓRIAS
 FORMATO (legenda do Instagram)
 Linha 1: manchete em letras normais (com maiúscula só no início e em nomes próprios), até 90 caracteres. O app converte para maiúsculas.
 Linha em branco.
-Corpo: de 2 a 5 parágrafos curtos.
+Corpo: parágrafos curtos, na quantidade pedida em TAMANHO.
 Linha em branco.
 Exatamente 5 hashtags relacionadas ao fato (sem inventar local).
 NÃO escreva linha de fonte ou créditos: o app acrescenta os créditos no rodapé automaticamente.
@@ -300,7 +300,19 @@ function parseJson(content: string): { problemas?: string[]; legenda?: string } 
   }
 }
 
-export async function writeStory(query: string, sources: ArticleText[], rawChat: Chat | null, extraPrompt = ''): Promise<StoryResult> {
+export type Tamanho = 'resumido' | 'normal' | 'completo';
+/** "normal" é o antigo nome do completo */
+const tamanhoDe = (t: Tamanho): 'resumido' | 'completo' => (t === 'resumido' ? 'resumido' : 'completo');
+/** tamanho da matéria: sempre com TODOS os dados das fontes, muda só o quanto desenvolve */
+const TAMANHO: Record<'resumido' | 'completo', string> = {
+  // os dois têm TODOS os dados das fontes; muda só o jeito de escrever
+  resumido:
+    'MODO RESUMIDO: traga TODOS os dados concretos das fontes (quem, nome, idade, onde, rua, bairro, quando, horário, como, números, falas, o que a polícia/órgão fez, situação atual), um dado atrás do outro, de forma DIRETA: frases curtas, sem frases de ligação nem contexto genérico. De 5 a 8 parágrafos curtos, uns 900 a 1400 caracteres. NUNCA uma ou duas frases só: se a fonte tem os dados, eles entram.',
+  completo:
+    'MODO COMPLETO: matéria jornalística completa, no estilo das matérias do portal: abre com o fato principal e desenvolve com TODOS os detalhes, falas e contexto que as fontes trazem, em texto fluido e bem ligado. De 6 a 11 parágrafos, uns 1500 a 2100 caracteres (o limite do Reels é 2200).',
+};
+
+export async function writeStory(query: string, sources: ArticleText[], rawChat: Chat | null, extraPrompt = '', tamanho: Tamanho = 'completo'): Promise<StoryResult> {
   const steps: string[] = [];
   let costUsd = 0;
   const chat: Chat | null = rawChat
@@ -317,7 +329,8 @@ export async function writeStory(query: string, sources: ArticleText[], rawChat:
   let model: string | null = null;
   if (chat) {
     try {
-      const sys = extraPrompt.trim() ? `${SYSTEM_PROMPT}\n\nPEDIDO DO JORNALISTA (siga sem quebrar as regras acima): ${extraPrompt.trim()}` : SYSTEM_PROMPT;
+      const base = `${SYSTEM_PROMPT}\n\n${TAMANHO[tamanhoDe(tamanho)]} Se as fontes forem curtas, use tudo o que elas têm, sem inventar para encher.`;
+      const sys = extraPrompt.trim() ? `${base}\n\nPEDIDO DO JORNALISTA (siga sem quebrar as regras acima): ${extraPrompt.trim()}` : base;
       const r = await chat(
         [
           { role: 'system', content: sys },

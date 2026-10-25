@@ -13,9 +13,10 @@
  */
 import { z } from 'zod';
 import type { Chat } from './writer';
+import { frases, type PalavraTempo } from './frases';
 import { HEADLINE_PRESETS } from '../core/presets';
 import type { Clip, Project } from '../core/model';
-import { clipEnd, deleteClips, findClip, projectDuration, setSpeed, splitClip } from '../core/timeline';
+import { clipEnd, deleteClips, findClip, moveClip, projectDuration, setSpeed, splitClip } from '../core/timeline';
 import { createBlurClip, createTextClip } from '../core/factory';
 import { placeClip } from '../core/timeline';
 import { effectiveTransform, updateClip } from '../core/edit';
@@ -47,6 +48,18 @@ const ActionSchema = z.discriminatedUnion('tipo', [
     area: z.enum(['centro', 'topo', 'base', 'esquerda', 'direita', 'topo-esquerda', 'topo-direita', 'base-esquerda', 'base-direita', 'tudo']),
   }),
   z.object({ tipo: z.literal('excluir'), clipId: z.string() }),
+  z.object({ tipo: z.literal('volume'), clipId: z.string(), volume: z.number().min(0).max(2) }),
+  z.object({ tipo: z.literal('mover'), clipId: z.string(), inicio: z.number().min(0) }),
+  z.object({ tipo: z.literal('fade'), clipId: z.string(), entrada: z.number().min(0).max(5).optional(), saida: z.number().min(0).max(5).optional() }),
+  z.object({
+    tipo: z.literal('pan'),
+    clipId: z.string(),
+    inicio: z.number().min(0),
+    duracao: z.number().min(0.3).max(30),
+    de: z.enum(['centro', 'esquerda', 'direita', 'topo', 'base']),
+    para: z.enum(['centro', 'esquerda', 'direita', 'topo', 'base']),
+  }),
+  z.object({ tipo: z.literal('legendas'), clipId: z.string().optional() }),
 ]);
 export type EditAction = z.infer<typeof ActionSchema>;
 
@@ -63,6 +76,8 @@ export interface EditContext {
 export interface TranscriptInput {
   segs: Segmento[];
   regs: Regiao[];
+  /** tempo de cada palavra ouvido pelo Whisper no aparelho (o mais exato) */
+  palavras?: PalavraTempo[];
 }
 
 /** `agulha`: posição atual do play head (em segundos) — é o que "aqui"/"nesse momento" do comando quer dizer. */
@@ -77,7 +92,15 @@ export function buildContext(p: Project, agulha = 0, tr?: TranscriptInput): Edit
     .sort((a, b) => a.inicio - b.inicio);
   // sem legendas na timeline: usa a transcrição automática, com o tempo de cada palavra (para cortar no lugar exato)
   const r1 = (x: number) => Math.round(x * 10) / 10;
-  const fromTr = tr
+  const fromTr = tr?.palavras?.length
+    ? frases(tr.segs, tr.regs, tr.palavras).map((f) => ({
+        inicio: r1(f.ini),
+        fim: r1(f.fim),
+        falante: f.sp,
+        texto: f.palavras.map((w) => w.w).join(' '),
+        palavras: f.palavras.map((w) => [w.w, r1(w.t), r1(w.e)] as [string, number, number]),
+      }))
+    : tr
     ? alignSegments(tr.segs, tr.regs).map((s) => ({
         inicio: r1(s.inicio),
         fim: r1(s.fim),
@@ -101,6 +124,11 @@ function prompt(ctx: EditContext): string {
     '- {"tipo":"zoom","clipId":"...","inicio":N,"duracao":N,"direcao":"aproximar"|"afastar","foco":"centro"|"esquerda"|"direita"|"topo"|"base"}: dá um zoom (Pan/Crop) num vídeo ou imagem.',
     '- {"tipo":"desfoque","inicio":N,"duracao":N,"area":"centro"|"topo"|"base"|"esquerda"|"direita"|"topo-esquerda"|"topo-direita"|"base-esquerda"|"base-direita"|"tudo"}: borra uma parte do quadro (ex.: cobrir um rosto, uma logo ou uma manchete de outro canal). Use os cantos para marca d\'água/logo de outro canal, que costuma ficar num dos 4 cantos.',
     '- {"tipo":"excluir","clipId":"..."}: remove um item inteiro (ex.: uma manchete ou desfoque que não serve mais).',
+    '- {"tipo":"volume","clipId":"...","volume":N}: volume de um vídeo/áudio (0 = mudo, 1 = normal, 2 = dobro).',
+    '- {"tipo":"mover","clipId":"...","inicio":N}: leva um item para começar em N segundos.',
+    '- {"tipo":"fade","clipId":"...","entrada":N,"saida":N}: o som entra/sai suave (segundos).',
+    '- {"tipo":"pan","clipId":"...","inicio":N,"duracao":N,"de":"esquerda","para":"direita"}: a câmera anda de um lado para o outro sobre o vídeo/imagem (Pan/Crop, com um pouco de zoom para ter espaço).',
+    '- {"tipo":"legendas","clipId":"..."}: gera a legenda da fala deste trecho (sem clipId: do vídeo todo).',
     `Manchetes disponíveis: ${PRESET_LIST.join(' | ')}`,
     `O vídeo dura ${ctx.duration}s. Itens na timeline (id, tipo, nome, início, duração): ${JSON.stringify(ctx.clips)}`,
     `A agulha (onde o jornalista está olhando agora) está em ${ctx.agulha}s. Quando o comando disser "aqui", "nesse momento", "onde está a agulha" ou não disser quando, use ${ctx.agulha}s como início.`,
@@ -142,7 +170,7 @@ export async function planEdit(chat: Chat, ctx: EditContext, comando: string): P
     const parsed = ActionSchema.safeParse(raw);
     if (!parsed.success) continue;
     const a = parsed.data;
-    if ('clipId' in a && !known.has(a.clipId)) continue;
+    if ('clipId' in a && a.clipId !== undefined && !known.has(a.clipId)) continue;
     actions.push(a);
   }
   return { actions, aviso: j.aviso, costUsd: r.costUsd ?? 0 };
@@ -200,6 +228,23 @@ function applyZoom(p: Project, a: Extract<EditAction, { tipo: 'zoom' }>): Projec
   return updateClip<VisualClip>(p, clip.id, (c) => ({ ...c, keyframes, transform: hadKeyframes ? c.transform : base }));
 }
 
+/** Pan: a câmera anda de um ponto a outro (com 20% de zoom, para ter onde andar sem mostrar borda) */
+function applyPan(p: Project, a: Extract<EditAction, { tipo: 'pan' }>): Project {
+  const clip = findClip(p, a.clipId);
+  if (!clip || (clip.type !== 'video' && clip.type !== 'image')) return p;
+  const relStart = Math.max(0, a.inicio - clip.start);
+  const relEnd = Math.min(clip.duration, relStart + a.duracao);
+  const base = effectiveTransform(clip, relStart);
+  const k = 1.2;
+  const at = (foco: string) => {
+    const f = FOCUS[foco] ?? FOCUS.centro!;
+    return { ...base, width: base.width * k, height: base.height * k, x: base.x - (f.x * base.width * (k - 1)) / 2, y: base.y - (f.y * base.height * (k - 1)) / 2 };
+  };
+  const kept = clip.keyframes.filter((x) => x.t < relStart - 0.05 || x.t > relEnd + 0.05);
+  const keyframes = [...kept, { ...at(a.de), t: relStart, easing: 'ease-in-out' as const }, { ...at(a.para), t: relEnd, easing: 'ease-in-out' as const }].sort((x, y) => x.t - y.t);
+  return updateClip<VisualClip>(p, clip.id, (c) => ({ ...c, keyframes }));
+}
+
 const AREA: Record<string, { x: number; y: number; width: number; height: number }> = {
   centro: { x: 0.5, y: 0.5, width: 0.5, height: 0.3 },
   topo: { x: 0.5, y: 0.16, width: 1, height: 0.3 },
@@ -221,6 +266,11 @@ export function applyEditActions(p: Project, actions: EditAction[]): Project {
     if (a.tipo === 'cortar') project = cutRange(project, a.inicio, a.fim);
     else if (a.tipo === 'velocidade') project = setSpeed(project, a.clipId, a.fator);
     else if (a.tipo === 'excluir') project = deleteClips(project, [a.clipId], true);
+    else if (a.tipo === 'volume') project = updateClip(project, a.clipId, (c) => (c.type === 'video' || c.type === 'audio' ? { ...c, volume: a.volume, muted: a.volume <= 0 } : c));
+    else if (a.tipo === 'mover') project = moveClip(project, a.clipId, a.inicio);
+    else if (a.tipo === 'fade')
+      project = updateClip(project, a.clipId, (c) => (c.type === 'video' || c.type === 'audio' ? { ...c, ...(a.entrada !== undefined ? { fadeIn: a.entrada } : {}), ...(a.saida !== undefined ? { fadeOut: a.saida } : {}) } : c));
+    else if (a.tipo === 'pan') project = applyPan(project, a);
     else if (a.tipo === 'zoom') project = applyZoom(project, a);
     else if (a.tipo === 'manchete') {
       if (!HEADLINE_PRESETS.some((pr) => pr.id === a.preset)) continue;

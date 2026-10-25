@@ -82,6 +82,8 @@ const ClipBase = {
   start: num.min(0),
   /** duração na timeline (s) */
   duration: num.min(0.05),
+  /** itens agrupados (Ctrl+G, ou legenda ligada ao vídeo) andam juntos na timeline */
+  group: z.string().optional(),
 };
 
 const VisualBase = {
@@ -157,7 +159,8 @@ export type TextFields = z.infer<typeof TextFieldsSchema>;
 
 /** legenda automática: palavras com o instante em que são ditas (s, relativo ao início do item) */
 export const CaptionSchema = z.object({
-  words: z.array(z.object({ w: z.string(), t: num.min(0) })),
+  /** palavras com o tempo (relativo ao início do item): t = começa, e = termina, s = número da frase, sp = quem fala */
+  words: z.array(z.object({ w: z.string(), t: num.min(0), e: num.min(0).optional(), s: num.min(0).optional(), sp: num.min(1).max(9).optional() })),
   /** quem fala (1, 2, ...): cor diferente por pessoa */
   speaker: num.min(1).max(9),
   /** limpa = sem fundo · caixa = com fundo · destaque = palavra falada em destaque (karaokê) */
@@ -165,6 +168,8 @@ export const CaptionSchema = z.object({
   look: z.enum(['limpa', 'caixa', 'destaque', 'caixa-destaque']),
   /** máximo de linhas (1, 2 ou 3): o texto diminui para caber */
   linhas: num.min(1).max(3).optional(),
+  /** ajuste fino da sincronia (s): + atrasa a legenda, − adianta */
+  offset: num.min(-3).max(3).optional(),
 });
 export type Caption = z.infer<typeof CaptionSchema>;
 
@@ -257,6 +262,8 @@ export const TrackSchema = z.object({
   hidden: z.boolean(),
   muted: z.boolean(),
   locked: z.boolean(),
+  /** volume da faixa inteira (multiplica o de cada item); ausente = 100% */
+  volume: num.min(0).max(2).optional(),
 });
 export type Track = z.infer<typeof TrackSchema>;
 

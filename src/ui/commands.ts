@@ -14,7 +14,7 @@ import {
   NEUTRAL_ADJUST,
 } from '../core/factory';
 import { uid } from '../core/id';
-import { clipEnd, deleteClips, duplicateClip, findClip, newTrack, placeClip, projectDuration, splitClip } from '../core/timeline';
+import { clipEnd, closeGaps, deleteClips, duplicateClip, findClip, newTrack, placeClip, projectDuration, splitClip, withGroups } from '../core/timeline';
 import { coverWindow, FRAME_LOGO_DEFAULT, fitVideosToFrame, frameAt, getFrame, insertFrame } from '../core/frames';
 import { getEditor } from '../state/store';
 import { preview } from '../engine/preview';
@@ -247,8 +247,12 @@ export function deleteSelection(ripple = false) {
     s.set('frameLogoId', null);
     return;
   }
-  const ids = [...s.selection];
-  s.apply((p) => deleteClips(p, ids, ripple));
+  // apaga o grupo inteiro (legenda ligada ao vídeo vai junto)
+  const ids = withGroups(s.project, [...s.selection]);
+  s.apply((p) => {
+    const q = deleteClips(p, ids, ripple);
+    return s.fechaVaos ? closeGaps(q) : q;
+  });
   s.select([]);
 }
 

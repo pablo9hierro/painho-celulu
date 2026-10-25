@@ -17,7 +17,7 @@ import { CITIES, type Pauta } from '../news/pautas';
 import type { SiteStory } from '../news/siteWriter';
 import type { SiteNews } from '../news/websg';
 import { fetchPhoto, findPautas, siteDelete, siteList, siteTest, writeSite } from '../news/postadorClient';
-import { autopostReport, BLOG_HOUR, BLOG_LOTE, getAutoConfig, instagramList, runJob, setAutoConfig, startAutopostClock, type Job } from '../news/autopostApp';
+import { autopostReport, BLOG_HOUR, BLOG_LOTE, getAutoConfig, instagramList, instagramRanking, runJob, setAutoConfig, startAutopostClock, type Job } from '../news/autopostApp';
 import { PostadorStatusCard, useAutopostStatus } from './PostadorStatus';
 import { postadorNative } from '../platform/postadorNative';
 import { aiReady, getFx } from '../news/client';
@@ -31,9 +31,10 @@ import { SettingsDialog } from './SettingsDialog';
 import { MusicTrim } from './MusicTrim';
 import { postToBlog } from '../news/blogPost';
 import { ensureDefaultTones, trackUrl } from '../news/defaultTones';
+import { releases } from '../news/release';
 import { videoTexts } from '../news/videoTexts';
 import { aiChat } from '../news/openrouter';
-import { getAiKey } from '../news/client';
+import { getAiKey, native, nativePost } from '../news/client';
 
 type Tab = 'pautas' | 'site' | 'tons' | 'auto';
 const TABS: { id: Tab; label: string }[] = [
@@ -105,6 +106,8 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
   /** andamento/resultado do "Postar no site" de cada notícia */
   const [post, setPost] = useState<Record<string, { msg: string; ok?: boolean }>>({});
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  /** pautas que a IA marcou como release/institucional (não vão para o site) */
+  const [rel, setRel] = useState<Set<string>>(new Set());
   /** postagem em lote: quantas já foram e quantas faltam */
   const [lote, setLote] = useState<{ feitas: number; total: number } | null>(null);
   useEffect(() => {
@@ -120,6 +123,12 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
     try {
       const r = await findPautas(q, cities);
       setPautas(r.pautas);
+      setRel(new Set());
+      // release de prefeitura/órgão: marca na lista e tira do "Marcar todas"
+      void releases(
+        aiChat(getAiKey(), native ? nativePost : undefined),
+        r.pautas.map((p) => ({ id: p.id, titulo: p.title, texto: p.blocks.filter((b) => b.type === 'p').map((b) => b.text ?? '').join(' ') })),
+      ).then(setRel);
       if (!r.pautas.length) setError('Nenhuma pauta encontrada agora. Tente outra busca ou mais cidades.');
     } catch (e) {
       setError((e as Error).message);
@@ -226,7 +235,7 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
     setBusy(null);
   };
 
-  const postaveis = (pautas ?? []).filter((p) => post[p.id]?.ok !== true);
+  const postaveis = (pautas ?? []).filter((p) => post[p.id]?.ok !== true && !rel.has(p.id));
   const toggleSel = (id: string) => setSelecionadas((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const marcarTodas = () => setSelecionadas(selecionadas.size === postaveis.length ? new Set() : new Set(postaveis.map((p) => p.id)));
 
@@ -272,7 +281,7 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
           <div className="post-cards" data-testid="postador-list">
             {pautas.map((p, i) => (
               <div key={p.id} className="post-card pauta-card" data-testid="postador-pauta">
-                {post[p.id]?.ok !== true && (
+                {post[p.id]?.ok !== true && !rel.has(p.id) && (
                   <input
                     type="checkbox"
                     className="pauta-check"
@@ -296,6 +305,7 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
                     {p.videos ? ` · ${p.videos} vídeo(s)` : ''}
                     {p.trendHits ? ' · em alta' : ''}
                   </span>
+                  {rel.has(p.id) && <span className="small post-warn" data-testid="postador-release">Release/institucional: não entra no site</span>}
                   {post[p.id] && <span className={`small ${post[p.id]!.ok === false ? 'error-text' : ''}`} data-testid="postador-post-status">{post[p.id]!.msg}</span>}
                 </span>
                 <button className="btn sm primary pauta-post" disabled={!!busy || post[p.id]?.ok === true} onClick={() => void postSite(p)} data-testid="postador-post">
@@ -600,6 +610,19 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
   const [nat, setNat] = useState<{ ligado: boolean; semEconomiaBateria: boolean } | null>(null);
   const live = useAutopostStatus();
   const [lista, setLista] = useState<Awaited<ReturnType<typeof instagramList>> | null>(null);
+  const [ranking, setRanking] = useState<Awaited<ReturnType<typeof instagramRanking>> | null>(null);
+  const [rankBusy, setRankBusy] = useState(false);
+  const [qtd, setQtd] = useState(2);
+  const loadRanking = async () => {
+    setRankBusy(true);
+    try {
+      setRanking(await instagramRanking());
+    } catch (e) {
+      notify((e as Error).message, 'error');
+    } finally {
+      setRankBusy(false);
+    }
+  };
   const [listErr, setListErr] = useState<string | null>(null);
   const [listBusy, setListBusy] = useState(false);
   const refresh = () => {
@@ -662,6 +685,7 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
         <strong>📰 Blog</strong>
         <span className="small">De manhã, às {BLOG_HOUR}h, publica de uma vez o lote do dia: até {BLOG_LOTE} melhores notícias novas que ainda não estão no site.</span>
         <span className="small muted">Hoje: {rep.blogHoje} publicada(s)</span>
+        {rep.ultimoSinal && <span className="small muted" data-testid="auto-sinal">Último sinal do celular: {new Date(rep.ultimoSinal).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
         <button className="btn sm" onClick={() => run({ kind: 'blog' })} data-testid="auto-blog-now">
           Publicar uma agora
         </button>
@@ -669,12 +693,45 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
       <div className="tone-card" data-testid="ig-box">
         <strong>📱 Instagram</strong>
         <span className="small">
-          Nos horários de pico (<b>{rep.slots.join(' · ')}</b>) posta como Reels a matéria do blog que teve <b>mais visualizações</b>. Não posta todas.
+          Manual: a IA ranqueia as matérias do blog por impacto/polêmica (crime, política, bombástico; release e nota institucional ficam de fora), com Guarabira, João Pessoa e Campina na frente. Você escolhe quantas postar.
         </span>
         <span className="small muted">Hoje: {rep.instagramHoje} Reels</span>
-        <button className="btn sm" onClick={() => run({ kind: 'instagram' })} data-testid="auto-ig-now">
-          Postar a melhor agora
+        <button className="btn sm" disabled={rankBusy} onClick={() => void loadRanking()} data-testid="ig-rank-load">
+          {rankBusy ? 'Avaliando as matérias…' : ranking ? 'Atualizar ranking' : 'Ver ranking'}
         </button>
+        {ranking && ranking.length === 0 && <p className="small muted" data-testid="ig-rank-vazio">Nada forte o bastante agora (nota mínima 7/10). Não posta por postar.</p>}
+        {ranking && ranking.length > 0 && (
+          <>
+            <ol className="ig-rank small" data-testid="ig-rank">
+              {ranking.map((r, i) => (
+                <li key={r.item.id} className={i < qtd ? 'vai' : ''}>
+                  <b>{r.item.title}</b>
+                  <span className="muted"> · {r.porque}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="row-gap wrap">
+              <span className="small">Quantas postar:</span>
+              <button className="btn sm" disabled={qtd <= 1} onClick={() => setQtd((q) => Math.max(1, q - 1))} aria-label="Menos uma" data-testid="ig-qtd-menos">
+                −
+              </button>
+              <b data-testid="ig-qtd">{Math.min(qtd, ranking.length)}</b>
+              <button className="btn sm" disabled={qtd >= ranking.length} onClick={() => setQtd((q) => Math.min(ranking.length, q + 1))} aria-label="Mais uma" data-testid="ig-qtd-mais">
+                +
+              </button>
+              <button
+                className="btn sm primary"
+                onClick={() => {
+                  run({ kind: 'lote', itens: ranking.slice(0, Math.min(qtd, ranking.length)).map((r) => r.item) });
+                  setRanking(null);
+                }}
+                data-testid="ig-lote"
+              >
+                Postar lote ({Math.min(qtd, ranking.length)})
+              </button>
+            </div>
+          </>
+        )}
         <div className="row-between">
           <strong className="small">Matérias publicadas no blog</strong>
           <button className="btn sm" disabled={listBusy} onClick={() => void loadList()} data-testid="ig-list-load">
@@ -690,7 +747,7 @@ function AutoTab({ openSettings }: { openSettings: () => void }) {
                 <span className="post-card-body">
                   <strong>{n.title}</strong>
                   <span className="small muted">
-                    nº {n.id}
+                    nº {n.id}{n.status && !/public/i.test(n.status) ? ` · ${n.status}` : ''}
                     {typeof n.views === 'number' ? ` · ${n.views} visualizações` : ''}
                     {n.perHour !== null ? ` · ${n.perHour.toFixed(0)}/h` : ''}
                     {n.date ? ` · ${new Date(n.date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}

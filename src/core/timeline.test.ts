@@ -151,3 +151,46 @@ describe('timeline', () => {
     expect(snapTime(4.5, [0, 5, 10], 0.1).snapped).toBe(false);
   });
 });
+
+describe('grupo, vácuos e faixa nova (linha do tempo estilo CapCut)', () => {
+  it('agrupa, acha o grupo e desagrupa', async () => {
+    const { toggleGroup, withGroups } = await import('./timeline');
+    let p = createProject('t', 'reel');
+    const a = createVideoClip(p, asset({ duration: 20 }), 0);
+    p = placeClip(p, a);
+    const b = createVideoClip(p, asset({ duration: 20 }), 10);
+    p = placeClip(p, b);
+    p = toggleGroup(p, [a.id, b.id]);
+    expect(withGroups(p, [a.id]).sort()).toEqual([a.id, b.id].sort());
+    p = toggleGroup(p, [a.id, b.id]);
+    expect(withGroups(p, [a.id])).toEqual([a.id]);
+  });
+
+  it('tira o vácuo sem quebrar a continuação que está em outra faixa', async () => {
+    const { closeGaps, addTrack } = await import('./timeline');
+    let p = createProject('t', 'reel');
+    const t1 = p.tracks.find((t) => t.kind === 'visual')!.id;
+    const { project, trackId: t2 } = addTrack(p, 'visual');
+    p = project;
+    const a = { ...createVideoClip(p, asset({ duration: 20 }), 0), duration: 10, trackId: t1 };
+    const b = { ...createVideoClip(p, asset({ duration: 20 }), 10), start: 10, duration: 5, trackId: t2 };
+    const c = { ...createVideoClip(p, asset({ duration: 20 }), 20), start: 20, duration: 3, trackId: t1 }; // vácuo de 15 a 20
+    p = { ...p, clips: [a, b, c] };
+    const q = closeGaps(p);
+    expect(q.clips.find((x) => x.id === b.id)!.start).toBe(10); // continua colado no fim do A
+    expect(q.clips.find((x) => x.id === c.id)!.start).toBe(15); // o vácuo sumiu
+  });
+
+  it('acha quem está no caminho e cria faixa logo acima', async () => {
+    const { overlapping, insertTrackNear } = await import('./timeline');
+    let p = createProject('t', 'reel');
+    const a = createVideoClip(p, asset({ duration: 20 }), 0);
+    p = placeClip(p, a);
+    const tr = a.trackId || p.clips[0]!.trackId;
+    expect(overlapping(p, tr, 1, 2, [])).toHaveLength(1);
+    expect(overlapping(p, tr, 1, 2, [p.clips[0]!.id])).toHaveLength(0);
+    const r = insertTrackNear(p, tr, 'visual');
+    const idx = r.project.tracks.findIndex((t) => t.id === r.trackId);
+    expect(r.project.tracks[idx - 1]!.id).toBe(tr);
+  });
+});

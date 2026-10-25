@@ -37,6 +37,7 @@
     "@fontsource/ibm-plex-mono": "^5.2.6",
     "@fontsource/ibm-plex-sans": "^5.2.6",
     "@fontsource/source-serif-4": "^5.2.8",
+    "@huggingface/transformers": "^3.7.5",
     "express": "^5.1.0",
     "immer": "^10.1.1",
     "mp4-muxer": "^5.2.2",

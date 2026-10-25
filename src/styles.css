@@ -2568,3 +2568,17 @@ input[type='range'] {
 
 .ai-edit-input, .ai-edit-cmd-text { resize: vertical; font-family: inherit; width: 100%; }
 .ai-edit-cmd-text { padding-right: 34px; }
+
+.ig-rank { margin: 4px 0 6px 18px; display: flex; flex-direction: column; gap: 4px; }
+.ig-rank li { opacity: 0.6; }
+.ig-rank li.vai { opacity: 1; }
+
+/* arrastar na timeline: trocar de lugar / faixa nova */
+.tl-drop { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 6; }
+.tl-drop.troca { background: rgba(255, 200, 0, 0.12); border: 2px dashed rgba(255, 200, 0, 0.8); color: #ffd84d; font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.tl-drop.nova { height: 6px; background: var(--accent); border-radius: 3px; box-shadow: 0 0 10px var(--accent); }
+.tl-drop.nova span { position: absolute; left: 8px; top: -18px; font-size: 11px; color: var(--accent); background: var(--bg-2); padding: 0 4px; border-radius: 4px; }
+.tl-row { position: relative; }
+.tl-vol-pop { position: absolute; left: 4px; top: 100%; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+.tl-vol-pop input { width: 120px; }
+.clip-group-badge { position: absolute; right: 3px; top: 2px; font-size: 10px; opacity: 0.85; pointer-events: none; }

@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
 import { aiChat } from '../news/openrouter';
 import { getAiKey } from '../news/client';
 import { buildContext, planEdit, applyEditActions, type EditAction, type TranscriptInput } from '../news/editAi';
-import { transcribeProject } from './captions';
+import { generateCaptions, generateCaptionsForClip, getCaptionStyle, transcribeProject } from './captions';
 import type { Project } from '../core/model';
 import { getEditor } from '../state/store';
 
@@ -85,7 +85,7 @@ export async function runQueue(onStep: (s: string) => void = () => undefined): P
         if (trCache?.sig !== sig) {
           onStep('Ouvindo o vídeo…');
           const r = await transcribeProject(project, s.media, { onStep }).catch(() => null);
-          trCache = { sig, tr: r ? { segs: r.segs, regs: r.regs } : null };
+          trCache = { sig, tr: r ? { segs: r.segs, regs: r.regs, palavras: r.palavras } : null };
         }
         tr = trCache.tr ?? undefined;
       }
@@ -97,6 +97,16 @@ export async function runQueue(onStep: (s: string) => void = () => undefined): P
         continue;
       }
       getEditor().apply((p) => applyEditActions(p, r.actions));
+      // legenda precisa ouvir o áudio (demora um pouco): roda depois das outras ações
+      for (const a of r.actions) {
+        if (a.tipo !== 'legendas') continue;
+        onStep('Gerando a legenda…');
+        if (a.clipId) await generateCaptionsForClip(a.clipId, onStep);
+        else {
+          const st = getCaptionStyle();
+          await generateCaptions({ ...st, onStep });
+        }
+      }
       setCmd(cmd.id, { status: 'feito', acoes: r.actions, aviso: r.aviso });
     } catch (e) {
       setCmd(cmd.id, { status: 'erro', erro: (e as Error).message });
@@ -117,6 +127,16 @@ export function describeAction(a: EditAction): string {
       return `zoom ${a.direcao} (${a.foco}) em ${a.inicio.toFixed(1)}s`;
     case 'desfoque':
       return `desfoque (${a.area}) em ${a.inicio.toFixed(1)}s`;
+    case 'volume':
+      return a.volume <= 0 ? 'mudo' : `volume ${Math.round(a.volume * 100)}%`;
+    case 'mover':
+      return `mover para ${a.inicio.toFixed(1)}s`;
+    case 'fade':
+      return 'som suave na entrada/saída';
+    case 'pan':
+      return `pan ${a.de} → ${a.para} em ${a.inicio.toFixed(1)}s`;
+    case 'legendas':
+      return a.clipId ? 'legenda do trecho' : 'legenda do vídeo';
     case 'excluir':
       return 'excluir item';
   }

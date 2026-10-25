@@ -7,7 +7,7 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { articleFromUrl, fetchArticle, searchRecent, type Article, type ArticleText, type Http, type Window } from './search';
 import { planSearch, type SearchPlan } from './plan';
-import { writeStory, type StoryResult } from './writer';
+import { writeStory, type StoryResult, type Tamanho } from './writer';
 import { aiChat } from './openrouter';
 import { cachedTrends, lookupHashtag, type HashtagLookup, type TrendsResult } from './trends';
 import { withTrendingHashtags, type HashtagPick } from './hashtags';
@@ -137,16 +137,16 @@ export async function findHashtag(tag: string): Promise<HashtagLookup> {
 
 export type WriteResult = StoryResult & { sources: { url: string; title: string; source: string; chars: number }[]; hashtags?: HashtagPick[] };
 
-export async function writeFromNews(query: string, articles: Article[], prompt: string): Promise<WriteResult> {
+export async function writeFromNews(query: string, articles: Article[], prompt: string, tamanho: Tamanho = 'normal'): Promise<WriteResult> {
   if (native) {
     const texts: ArticleText[] = await Promise.all(articles.map((a) => (a.readable ? fetchArticle(a, nativeHttp) : Promise.resolve({ url: a.url, title: a.title, source: a.source, date: a.date, text: a.snippet }))));
     const key = getAiKey();
-    const r = await withTrendingHashtags(await writeStory(query, texts, aiChat(key, nativePost), prompt), texts, nativeHttp);
+    const r = await withTrendingHashtags(await writeStory(query, texts, aiChat(key, nativePost), prompt, tamanho), texts, nativeHttp);
     return { ...r, sources: texts.map((t) => ({ url: t.url, title: t.title, source: t.source, chars: t.text.length })) };
   }
   return api<WriteResult>('/api/news/write', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, articles, prompt, apiKey: getAiKey() || undefined }),
+    body: JSON.stringify({ query, articles, prompt, tamanho, apiKey: getAiKey() || undefined }),
   });
 }

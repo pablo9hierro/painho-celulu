@@ -87,7 +87,7 @@ export function placeImages(blocks: Block[], newCount: number): { after: number;
   return out;
 }
 
-export function buildHtml(paragrafos: string[], blocks: Block[], source: string, url: string): { html: string; imagens: { src: string; caption: string }[] } {
+export function buildHtml(paragrafos: string[], blocks: Block[], source: string, url: string, extras: { source: string; url: string }[] = []): { html: string; imagens: { src: string; caption: string }[] } {
   const imgs = placeImages(blocks, paragrafos.length);
   const fig = (i: { src: string; caption: string }) =>
     `<figure><img src="${esc(i.src)}" alt="${esc(i.caption || source)}" /><figcaption>${esc(i.caption ? `${i.caption} (Foto: reprodução/${source})` : `Foto: reprodução/${source}`)}</figcaption></figure>`;
@@ -103,7 +103,8 @@ export function buildHtml(paragrafos: string[], blocks: Block[], source: string,
     const yt = /(?:embed\/|v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/.exec(v.src!)?.[1];
     parts.push(yt ? `<p><iframe width="560" height="315" src="https://www.youtube.com/embed/${yt}" frameborder="0" allowfullscreen></iframe></p>` : `<p>Vídeo: <a href="${esc(v.src!)}" target="_blank" rel="noopener">${esc(v.src!)}</a></p>`);
   }
-  parts.push(`<p><em>Com informações de <a href="${esc(url)}" target="_blank" rel="noopener">${esc(source)}</a>.</em></p>`);
+  const creditos = [{ source, url }, ...extras.filter((e) => e.url !== url)].map((c) => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.source)}</a>`);
+  parts.push(`<p><em>Com informações de ${creditos.length > 1 ? `${creditos.slice(0, -1).join(', ')} e ${creditos.at(-1)}` : creditos[0]}.</em></p>`);
   return { html: parts.join('\n'), imagens: imgs.map(({ src, caption }) => ({ src, caption })) };
 }
 
@@ -197,7 +198,7 @@ export async function writeSiteStory(p: Pauta, rawChat: Chat | null, prompt = ''
   const unverified = unverifiedFacts(`TITULO\n\n${all}`, sources);
   if (unverified.length) steps.push(`Conferir na fonte: ${unverified.join(', ')}`);
   const categoria = CATEGORIAS.find((c) => c.toLowerCase() === String(j.categoria ?? '').toLowerCase()) ?? (p.city ? 'Cidades' : 'Brasil');
-  const { html, imagens } = buildHtml(paragrafos, p.blocks, p.source, p.url);
+  const { html, imagens } = buildHtml(paragrafos, p.blocks, p.source, p.url, p.fontesExtras ?? []);
   if (imagens.length) steps.push(`${imagens.length} imagem(ns) da fonte nos mesmos lugares do texto original.`);
   return {
     titulo: cleanText(String(j.titulo ?? p.title)).slice(0, 120),

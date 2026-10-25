@@ -125,10 +125,22 @@ export async function transcribeWav(key: string, wavB64: string, dur: number, fa
   throw new Error(errors.join(' | '));
 }
 
+/**
+ * Quanto tempo a palavra leva para ser falada: pelas SÍLABAS (grupos de vogal),
+ * mais uma pausa curta depois de vírgula e maior depois de ponto.
+ */
+export function pesoFala(w: string): number {
+  const letras = w.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const silabas = Math.max(1, (letras.match(/[aeiouy]+/g) ?? []).length);
+  const numero = /\d/.test(letras) ? letras.replace(/\D/g, '').length : 0; // número falado por extenso é longo
+  const pausa = /[.!?…]$/.test(w) ? 1.6 : /[,;:]$/.test(w) ? 0.8 : 0;
+  return silabas + numero * 1.5 + pausa + 0.35;
+}
+
 /** Tempo de cada palavra dentro da frase (proporcional ao tamanho da palavra). */
 export function wordTimes(texto: string, dur: number): { w: string; t: number }[] {
   const words = texto.split(/\s+/).filter(Boolean);
-  const weight = words.map((w) => 1 + w.replace(/[^\p{L}\p{N}]/gu, '').length);
+  const weight = words.map(pesoFala);
   const total = weight.reduce((a, b) => a + b, 0) || 1;
   let acc = 0;
   return words.map((w, i) => {
@@ -191,8 +203,8 @@ export function speechRegions(pcm: Float32Array, rate: number, offset = 0): Regi
     if (e[i]! >= th) {
       if (start < 0) start = i;
       quiet = 0;
-    } else if (start >= 0 && ++quiet > 12) {
-      // 240 ms de silêncio fecha o trecho
+    } else if (start >= 0 && ++quiet > 8) {
+      // 160 ms de silêncio fecha o trecho (pausas mais finas = palavras mais no lugar)
       out.push({ ini: start, fim: i - quiet + 1 });
       start = -1;
       quiet = 0;
@@ -291,7 +303,7 @@ export function wordTimesVoiced(texto: string, ini: number, fim: number, regs: R
   const voiced = parts.reduce((s, r) => s + r.b - r.a, 0);
   if (voiced < (fim - ini) * 0.3) return wordTimes(texto, (fim - ini) * 0.92);
   const words = texto.split(/\s+/).filter(Boolean);
-  const weight = words.map((w) => 1 + w.replace(/[^\p{L}\p{N}]/gu, '').length);
+  const weight = words.map(pesoFala);
   const total = weight.reduce((a, b) => a + b, 0) || 1;
   let acc = 0;
   return words.map((w, i) => {

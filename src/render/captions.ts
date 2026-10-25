@@ -27,16 +27,69 @@ interface Laid {
   i: number;
 }
 
+/** a frase aparece um instante ANTES da fala (leitura confortável) e some logo depois */
+const LEAD = 0.12;
+const HOLD = 0.35;
+
+type W = { w: string; t: number; e?: number; s?: number; sp?: number };
+
+/**
+ * Frase da hora dentro do item de legenda (um item tem todas as frases do
+ * trecho). Respeita o ajuste de sincronia e o texto corrigido à mão: com o
+ * mesmo número de palavras na linha, mantém o tempo de cada uma; senão,
+ * espalha as palavras novas no tempo da frase.
+ */
+export function phraseAt(c: TextClip, t: number): { words: W[]; since: number; speaker: number; tt: number } | null {
+  const cap = c.caption;
+  const tt = t - (cap?.offset ?? 0);
+  const linhas = c.fields.title.split('\n').map((l) => l.trim()).filter(Boolean);
+  const base = (cap?.words ?? []) as W[];
+  // frases guardadas (s = número da frase); itens antigos: uma frase só
+  const grupos: W[][] = [];
+  if (base.length && base.some((x) => x.s !== undefined)) {
+    for (const wd of base) {
+      const s = wd.s ?? 0;
+      (grupos[s] ??= []).push(wd);
+    }
+  } else if (base.length) grupos.push(base);
+  let frases: W[][] = grupos.filter(Boolean);
+  const typedAll = linhas.join(' ').split(/\s+/).filter(Boolean);
+  if (!frases.length) {
+    if (!typedAll.length) return null;
+    frases = [wordTimes(typedAll.join(' '), c.duration * 0.92)];
+  } else if (linhas.length === frases.length) {
+    frases = frases.map((fr, i) => {
+      const novas = linhas[i]!.split(/\s+/).filter(Boolean);
+      if (novas.length === fr.length) return fr.map((x, k) => ({ ...x, w: novas[k]! }));
+      const ini = fr[0]!.t;
+      const fim = fr[fr.length - 1]!.e ?? ini + 1.5;
+      return wordTimes(novas.join(' '), Math.max(0.3, fim - ini)).map((x) => ({ ...x, t: ini + x.t, sp: fr[0]!.sp }));
+    });
+  } else if (typedAll.join(' ') !== base.map((x) => x.w).join(' ')) {
+    // texto muito mudado: uma frase só, espalhada no tempo do item
+    frases = [wordTimes(typedAll.join(' '), c.duration * 0.92)];
+  }
+  let idx = -1;
+  for (let i = 0; i < frases.length; i++) if (tt >= frases[i]![0]!.t - LEAD) idx = i;
+  if (idx < 0) return null;
+  const fr = frases[idx]!;
+  const ini = fr[0]!.t;
+  const prox = frases[idx + 1]?.[0]?.t ?? Infinity;
+  const fim = Math.min(fr[fr.length - 1]!.e ?? Math.min(prox, c.duration), prox);
+  // frase única de item antigo: fica até o fim do item
+  if (frases.length > 1 && tt > fim + HOLD) return null;
+  return { words: fr, since: tt - (ini - LEAD), speaker: fr[0]!.sp ?? cap?.speaker ?? 1, tt };
+}
+
 export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: number; t: number }) {
   const cap = c.caption;
-  // texto editado à mão: refaz o tempo das palavras pela duração do item
-  const typed = c.fields.title.trim().split(/\s+/).filter(Boolean).join(' ');
-  const words = cap?.words.length && cap.words.map((x) => x.w).join(' ') === typed ? cap.words : wordTimes(typed, c.duration * 0.92);
-  if (!words.length) return;
+  const ph = phraseAt(c, t);
+  if (!ph) return;
+  const words = ph.words;
   const look = cap?.look ?? 'limpa';
   const boxed = look === 'caixa' || look === 'caixa-destaque';
   const karaoke = look === 'destaque' || look === 'caixa-destaque';
-  const color = SPEAKER_COLORS[((cap?.speaker ?? 1) - 1) % SPEAKER_COLORS.length]!;
+  const color = SPEAKER_COLORS[(ph.speaker - 1) % SPEAKER_COLORS.length]!;
   const upper = c.style.uppercase;
   // a ALTURA da caixa define o tamanho da letra (esticar em cima/embaixo ou pelo canto
   // aumenta/diminui); a LARGURA define onde a linha quebra. Se o texto não couber no
@@ -75,13 +128,14 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
   const y0 = (h - blockH) / 2;
   const align = c.style.align;
   // entrada curta (sobe 6% e aparece)
-  const inF = eo(clamp(t / 0.15, 0, 1));
+  const inF = eo(clamp(ph.since / 0.12, 0, 1));
   ctx.save();
   ctx.globalAlpha *= inF;
   ctx.translate(0, (1 - inF) * size * 0.3);
   // palavra atual (pela fala)
   let cur = -1;
-  for (let i = 0; i < words.length; i++) if (t >= words[i]!.t) cur = i;
+  // a palavra acende um tiquinho antes do som (o olho chega antes do ouvido)
+  for (let i = 0; i < words.length; i++) if (ph.tt >= words[i]!.t - 0.05) cur = i;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   lines.forEach((line, li) => {
@@ -113,7 +167,7 @@ export function drawCaption(ctx: C, c: TextClip, { w, h, t }: { w: number; h: nu
       const said = word.i <= cur;
       if (active) {
         // pílula azul da marca atrás da palavra falada, com um leve pulo
-        const since = t - words[word.i]!.t;
+        const since = ph.tt - words[word.i]!.t;
         const pop = 1 + 0.08 * Math.max(0, 1 - since / 0.18);
         const padX = size * 0.16;
         ctx.save();

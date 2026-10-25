@@ -11,6 +11,7 @@ import { planSearch, type SearchPlan } from './plan';
 import { cachedTrends } from './trends';
 import { aiChat } from './openrouter';
 import { writeSiteStory, type SiteStory, type ToneOption } from './siteWriter';
+import { enrichPauta } from './enrich';
 import { api, getAiKey, native, nativeHttp, nativePost } from './client';
 
 const UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Mobile Safari/537.36';
@@ -66,7 +67,13 @@ export async function findPautas(q: string, cities: string[]): Promise<{ pautas:
 
 /** Escreve a matéria do site (com as imagens nos lugares) e escolhe o tom/áudio do vídeo. */
 export async function writeSite(p: Pauta, prompt: string, tones: ToneOption[]): Promise<SiteStory> {
-  if (native) return writeSiteStory(p, aiChat(getAiKey(), nativePost), prompt, tones);
+  if (native) {
+    const steps: string[] = [];
+    // fonte sem texto ("0 parágrafos"): lê de novo e completa com outros portais antes de escrever
+    const rica = await enrichPauta(p, nativeHttp, steps);
+    const s = await writeSiteStory(rica, aiChat(getAiKey(), nativePost), prompt, tones);
+    return { ...s, steps: [...steps, ...s.steps] };
+  }
   return api<SiteStory>('/api/site/write', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -184,12 +191,12 @@ export async function siteTest(): Promise<{ ok: true; total: number }> {
   return siteApi('/api/site/test', {});
 }
 
-export async function siteList(q: string): Promise<SiteNews[]> {
+export async function siteList(q: string, pages = 3): Promise<SiteNews[]> {
   if (native) {
     const { searchNews } = await import('./websg');
-    return searchNews(nativeSiteHttp, withBase(getSiteConfig()), q, 3);
+    return searchNews(nativeSiteHttp, withBase(getSiteConfig()), q, pages);
   }
-  return (await siteApi<{ news: SiteNews[] }>('/api/site/list', { q })).news;
+  return (await siteApi<{ news: SiteNews[] }>('/api/site/list', { q, pages })).news;
 }
 
 export async function siteDelete(id: number): Promise<void> {

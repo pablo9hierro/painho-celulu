@@ -76,6 +76,7 @@ export async function notas(chat: Chat | null, items: SiteNews[]): Promise<Map<n
 Nota alta (8-10): crime grave, assassinato, tragédia, polêmica, escândalo, briga, vazamento, flagrante em vídeo, famoso envolvido, caso bizarro, revolta popular.
 Nota média (5-7): acidente, prisão comum, denúncia, decisão que afeta o bolso do povo.
 Nota baixa (0-4): agenda, serviço, nota institucional, evento, campanha, obra, previsão do tempo, esporte sem polêmica.
+RELEASE = nota 0: texto de divulgação de prefeitura, governo, órgão, político ou empresa falando bem de si (inauguração, entrega, obra, campanha, programa, evento, elogio à gestão). Release nunca vai, mesmo sendo da nossa cidade.
 Diga também se a notícia é de ${CIDADES_DA_CASA.join(', ')} (campo "cidade", com o nome exato, ou null) e a melhor hashtag do assunto (sem #, uma palavra só, ex.: guarabira, joaopessoa, feminicidio).
 Responda SÓ JSON: {"notas":[{"id":123,"nota":8,"cidade":"Guarabira","hashtag":"guarabira","motivo":"curto"}]}`,
           },

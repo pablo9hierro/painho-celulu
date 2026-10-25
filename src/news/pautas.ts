@@ -59,6 +59,8 @@ export interface Pauta {
   readable: boolean;
   /** outros veículos que deram a mesma notícia */
   others?: string[];
+  /** portais de onde vieram fatos extras (quando a fonte não deixou ler o texto) */
+  fontesExtras?: { source: string; url: string }[];
 }
 
 /** Transporte com conferência de imagem (HEAD/GET leve). */
@@ -147,6 +149,15 @@ function imgSrc(tag: string, base: string): string | null {
 /** imagem com cara de logo/marca/imagem padrão do site (não é foto da notícia) */
 export const LOGO_LIKE = /logo|marca[-_]|brand|default|padrao|placeholder|sem[-_]?imagem|no[-_]?image|avatar|favicon|icon[-_.]|share[-_]?image|og[-_]?image|thumb[-_]?padrao|watermark/i;
 
+/** texto separado por <br><br> (sem <p>): vira uma lista de parágrafos */
+export function brParagraphs(scope: string): string[] {
+  const corpo = scope.replace(/<(script|style|figure|figcaption|ul|ol|nav|aside|header|footer)[\s\S]*?<\/\1>/gi, ' ');
+  return corpo
+    .split(/(?:<br\s*\/?>\s*){2,}|<\/?(?:p|div)[^>]*>/i)
+    .map((s) => strip(s))
+    .filter(Boolean);
+}
+
 export function extractBlocks(html: string, base: string): { blocks: Block[]; ogImage: string | null; title: string; date: string | null } {
   const meta = (p: string) => new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]*content=["']([^"']*)["']`, 'i').exec(html)?.[1] ?? new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${p}["']`, 'i').exec(html)?.[1] ?? '';
   const scope = /<article[\s\S]*?<\/article>/i.exec(html)?.[0] ?? /<main[\s\S]*?<\/main>/i.exec(html)?.[0] ?? html;
@@ -197,6 +208,11 @@ export function extractBlocks(html: string, base: string): { blocks: Block[]; og
       const link = /href=["'](https:\/\/www\.instagram\.com\/[^"']+)["']/i.exec(tag)?.[1];
       if (link) blocks.push({ type: 'video', src: link, kind: 'instagram' });
     }
+  }
+  // portais que separam o texto com <br><br> em vez de <p> (ex.: Ponto PB): quebra pelos <br>
+  if (blocks.filter((b) => b.type === 'p').length < 2) {
+    const extra = brParagraphs(scope).filter((t) => t.length >= 40 && !JUNK_P.test(t));
+    if (extra.length >= 2) blocks.unshift(...extra.map((t) => ({ type: 'p' as const, text: t })));
   }
   const og = meta('og:image');
   const ogImage = og ? absUrl(og, base) : null;

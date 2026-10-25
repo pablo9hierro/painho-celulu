@@ -30,7 +30,7 @@ export function buildAudioPlan(p: Project): AudioSegment[] {
     if (c.type === 'video' && !c.hasAudio) continue;
     if (c.muted || c.volume <= 0) continue;
     const track = p.tracks.find((t) => t.id === c.trackId);
-    if (!track || track.muted) continue;
+    if (!track || track.muted || (track.volume ?? 1) <= 0) continue;
     if (track.kind === 'visual' && track.hidden) continue;
     out.push({
       clipId: c.id,
@@ -39,7 +39,7 @@ export function buildAudioPlan(p: Project): AudioSegment[] {
       duration: c.duration,
       sourceIn: c.sourceIn,
       speed: c.speed,
-      volume: c.volume,
+      volume: c.volume * (track.volume ?? 1),
       fadeIn: Math.min(c.fadeIn, c.duration / 2),
       fadeOut: Math.min(c.fadeOut, c.duration / 2),
       pitch: VOICE_PITCH[c.voice ?? 'normal'],

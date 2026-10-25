@@ -30,9 +30,10 @@ import { ensureDefaultTones } from './defaultTones';
 import { maintainTokens } from './igToken';
 import { getAiKey, nativeHttp, nativePost } from './client';
 import { siteList, getIgConfig, getSiteConfig, nativeIgHttp, nativePautaHttp, nativeSiteHttp, setIgConfig, withBase } from './postadorClient';
-import { firstPhoto, loadQueue, postToBlog } from './blogPost';
+import { blogPublicadasHoje, firstPhoto, loadQueue, morePhotos, postToBlog } from './blogPost';
 import { videoTexts } from './videoTexts';
 import { censorCaption } from './censor';
+import { releases } from './release';
 import { downloadFromLink } from './downloadClient';
 import { createStoryVideo } from '../ui/storyVideo';
 import { exporter, media as mediaApi, projects } from '../platform/api';
@@ -48,7 +49,6 @@ export interface AutoConfig {
 }
 const CFG_KEY = 'pn-autopost-cfg';
 const ST_KEY = 'pn-autopost-state';
-const RUN_KEY = 'pn-autopost-runs';
 const BLOG_KEY = 'pn-autopost-blog';
 const LOG_KEY = 'pn-autopost-log';
 const GAP_KEY = 'pn-ig-proximo';
@@ -56,7 +56,7 @@ const GAP_KEY = 'pn-ig-proximo';
 export const igGapMs = (rnd = Math.random()) => Math.round((3 + rnd * 2) * 60_000);
 
 /** blog: lote da manhã a partir das 7h (tenta até 12h se algo falhar) */
-export const BLOG_HOUR = 7;
+export const BLOG_HOUR = 6;
 const BLOG_UNTIL = 12;
 /** quantas matérias o lote da manhã publica */
 export const BLOG_LOTE = 10;
@@ -69,7 +69,6 @@ const MAX_TRIES = 3;
 const SLOT_CAP = 2;
 /** Instagram automático: no máximo 8 Reels por dia, espalhados (picos + a cada ~1h40 das 8h às 22h) */
 export const IG_MAX_DIA = 8;
-const IG_ESPACO_MIN = 100;
 
 export function getAutoConfig(): AutoConfig {
   try {
@@ -365,8 +364,18 @@ export async function blogBatch(st: LearnState, sitePosts: SiteNews[], max: numb
     }))
     .sort((a, b) => b.score - a.score);
   // a mesma notícia de dois portais conta uma vez só
-  const picks: Pauta[] = [];
+  let picks: Pauta[] = [];
   for (const { p } of fresh) if (!picks.some((x) => sameStory(x.title, p.title))) picks.push(p);
+  // release de prefeitura/órgão (publicidade disfarçada de notícia) não entra
+  setStatus({ step: 'Separando release e nota institucional…' });
+  const rel = await releases(
+    aiChat(getAiKey(), nativePost),
+    picks.slice(0, 30).map((p) => ({ id: p.id, titulo: p.title, texto: p.blocks.filter((b) => b.type === 'p').map((b) => b.text ?? '').join(' ') })),
+  );
+  if (rel.size) {
+    log(st, `Blog: ${rel.size} release(s)/nota(s) institucional(is) descartado(s): ${picks.filter((p) => rel.has(p.id)).map((p) => p.title.slice(0, 40)).join('; ')}`);
+    picks = picks.filter((p) => !rel.has(p.id));
+  }
   if (!picks.length) {
     log(st, 'Blog: nenhuma notícia nova (até 12 h, com foto) que ainda não esteja no site.');
     if (ctl) ctl.done = true;
@@ -516,6 +525,8 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
     subtitle: vt.subtitulo,
     keywords: [vt.destaque ?? '', ...palavras].filter(Boolean),
     photo,
+    // sem vídeo e com mais fotos: slide
+    morePhotos: videoFile ? [] : await morePhotos(imagens, n.url),
     video: videoFile,
     audioId: tone.track.mediaId,
     audioStart: tone.track.inicio,
@@ -581,16 +592,35 @@ export async function instagramOnce(st: LearnState, sitePosts: SiteNews[], chose
   }
 }
 
+/**
+ * Ranking do Instagram para o botão "Postar lote": as matérias publicadas no
+ * blog nas últimas 24 h que ainda não foram ao Instagram, com nota da IA de
+ * impacto/polêmica (sem release/institucional), cidades da casa primeiro.
+ */
+export async function instagramRanking(): Promise<{ item: SiteNews; nota: number; porque: string }[]> {
+  const site = getSiteConfig();
+  if (!site.user || !site.pass) throw new Error('Coloque o usuário e a senha do site em ⚙ Configurações.');
+  const list = await siteList('', 6);
+  const st = loadState();
+  const now = new Date();
+  const posted = new Set(st.stories.filter((s) => s.igId && s.siteId).map((s) => s.siteId!));
+  const cands = list.filter((x) => !posted.has(x.id) && !/revis|inativ|agend/i.test(x.status ?? '') && (!x.date || now.getTime() - new Date(x.date).getTime() <= 24 * 3600_000));
+  const ns = await notas(aiChat(getAiKey(), nativePost), cands);
+  const hoje = brt(now).day;
+  const cidadesHoje = new Set(st.stories.filter((s) => s.igId && s.city && brt(new Date(s.postedAt)).day === hoje).map((s) => s.city!));
+  return ordenar(cands, ns, cidadesHoje).map((x) => ({ item: x.item, nota: x.nota.nota, porque: x.porque }));
+}
+
 /** Matérias publicadas no blog para a lista do Instagram (as mais novas primeiro). */
 export async function instagramList(): Promise<(SiteNews & { noInstagram: boolean; perHour: number | null })[]> {
   const site = getSiteConfig();
   if (!site.user || !site.pass) throw new Error('Coloque o usuário e a senha do site em ⚙ Configurações.');
-  const list = await siteList('');
+  // 6 páginas do painel: num dia de lote grande, as primeiras matérias ficavam de fora
+  const list = await siteList('', 6);
   const st = loadState();
   const posted = new Set(st.stories.filter((s) => s.igId && s.siteId).map((s) => s.siteId!));
   const now = Date.now();
   return list
-    .filter((n) => !/revis|inativ|agend/i.test(n.status ?? ''))
     .map((n) => {
       const age = n.date ? (now - new Date(n.date).getTime()) / 3600_000 : null;
       return {
@@ -603,8 +633,8 @@ export async function instagramList(): Promise<(SiteNews & { noInstagram: boolea
 
 // ---------------------------------------------------------------- fila de trabalhos (fora da tela)
 
-export type Job = { kind: 'auto' } | { kind: 'blog' } | { kind: 'instagram'; item?: SiteNews };
-const JOB_NAME = (j: Job) => (j.kind === 'auto' ? 'Automático' : j.kind === 'blog' ? 'Blog' : j.item ? `Instagram: ${j.item.title.slice(0, 40)}` : 'Instagram (a melhor)');
+export type Job = { kind: 'auto' } | { kind: 'blog' } | { kind: 'instagram'; item?: SiteNews } | { kind: 'lote'; itens: SiteNews[] };
+const JOB_NAME = (j: Job) => (j.kind === 'auto' ? 'Automático' : j.kind === 'blog' ? 'Blog' : j.kind === 'lote' ? `Instagram: lote de ${j.itens.length}` : j.item ? `Instagram: ${j.item.title.slice(0, 40)}` : 'Instagram (a melhor)');
 const queue: {
   job: Job;
   done: (ok: boolean) => void;
@@ -692,6 +722,20 @@ async function execute(job: Job): Promise<boolean> {
       }
     }
     if (job.kind === 'instagram' && job.item) return await instagramOnce(st, [], job.item);
+    if (job.kind === 'lote') {
+      // um atrás do outro (disparo manual: sem esperar intervalo)
+      let feitos = 0;
+      for (let i = 0; i < job.itens.length; i++) {
+        setStatus({ step: `Reels ${i + 1} de ${job.itens.length}: "${job.itens[i]!.title.slice(0, 50)}"` });
+        try {
+          if (await instagramOnce(st, [], job.itens[i]!)) feitos++;
+        } catch (e) {
+          log(st, `Instagram falhou em "${job.itens[i]!.title.slice(0, 50)}": ${(e as Error).message}`);
+        }
+      }
+      log(st, `Instagram: lote terminado (${feitos} de ${job.itens.length} publicados).`);
+      return feitos > 0;
+    }
     const sitePosts = await stats(st, now);
     if (job.kind === 'blog') return (await blogBatch(st, sitePosts, 1)) > 0;
     if (job.kind === 'instagram') return await instagramOnce(st, sitePosts);
@@ -712,32 +756,8 @@ async function execute(job: Job): Promise<boolean> {
       }
       writeJson(BLOG_KEY, ctl);
     }
-    // INSTAGRAM nos horários de pico: a melhor do blog
-    const tries = readJson<Record<string, number>>(RUN_KEY, {});
-    const hoje = brt(now).day;
-    const doDia = st.stories.filter((s) => s.igId && brt(new Date(s.postedAt)).day === hoje);
-    if (doDia.length >= IG_MAX_DIA) return did;
-    const slot = openSlot(st, now, tries);
-    const ultimo = st.stories.filter((s) => s.igId).reduce((m, s) => Math.max(m, new Date(s.postedAt).getTime()), 0);
-    const { h: hora } = brt(now);
-    const espacado = hora >= 8 && hora < 22 && now.getTime() - ultimo >= IG_ESPACO_MIN * 60_000;
-    if (!slot && !espacado) return did;
-    // automático: espera 3 a 5 min (sorteado) depois do último Reels, para não parecer disparo em massa
-    const next = readJson<{ at: string | null }>(GAP_KEY, { at: null }).at;
-    if (next && now.getTime() < new Date(next).getTime()) {
-      log(st, `Instagram: aguardando o intervalo (até ${new Date(next).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}).`);
-      return did;
-    }
-    if (slot) tries[slot] = (tries[slot] ?? 0) + 1;
-    writeJson(RUN_KEY, Object.fromEntries(Object.entries(tries).slice(-40)));
-    let ok = false;
-    try {
-      ok = await instagramOnce(st, sitePosts);
-    } catch (e) {
-      log(st, `Instagram falhou: ${(e as Error).message}. Tenta de novo no próximo tique.`);
-    }
-    if (slot && (ok || tries[slot]! >= MAX_TRIES)) st.slotsUsed.push(slot);
-    return ok || did;
+    // Instagram: manual, pelo botão "Postar lote" (escolhe as melhores do ranking)
+    return did;
   } finally {
     // não perde o que outro trabalho gravou no meio (ex.: posts)
     const cur = loadState();
@@ -754,6 +774,8 @@ export async function tick(force?: 'blog' | 'instagram'): Promise<void> {
     return;
   }
   if (!getAutoConfig().ativo) return;
+  // sinal de vida (mostra na tela se o celular está acordando o app com a tela bloqueada)
+  writeJson('pn-ultimo-sinal', { at: new Date().toISOString() });
   await runJob({ kind: 'auto' }).catch(() => undefined);
 }
 
@@ -764,7 +786,8 @@ export function autopostReport() {
   return {
     ...report(st),
     log: liveLog().slice(-60).reverse(),
-    blogHoje: ctl.day === hoje ? ctl.count : 0,
+    ultimoSinal: readJson<{ at: string | null }>('pn-ultimo-sinal', { at: null }).at,
+    blogHoje: Math.max(ctl.day === hoje ? ctl.count : 0, blogPublicadasHoje()),
     instagramHoje: st.stories.filter((s) => s.igId && brt(new Date(s.postedAt)).day === hoje).length,
   };
 }

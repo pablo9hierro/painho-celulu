@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseTranscricao, splitSegments, transcribeWav, wordTimes } from './transcribe';
-import { applyCaptions, buildCaptionClips, CAPTION_PRESET } from '../ui/captions';
+import { applyCaptions, CAPTION_PRESET } from '../ui/captions';
 import { createProject } from '../core/factory';
 import { TextClipSchema } from '../core/model';
 
@@ -28,22 +28,60 @@ describe('legendas automáticas', () => {
     expect(parts.every((p) => p.falante === 2 && p.texto.split(' ').length <= 7)).toBe(true);
   });
 
-  it('cria itens válidos numa trilha "Legendas" e gerar de novo substitui', () => {
-    const p = createProject('t', 'reel');
+  it('um bloco de legenda por trecho de vídeo, agrupado com ele; gerar de novo substitui', async () => {
+    const { buildCaptionBlocks, frases, blocosDeFala } = await import('../ui/captions');
+    const { createVideoClip } = await import('../core/factory');
+    const { placeClip } = await import('../core/timeline');
+    let p = createProject('t', 'reel');
+    const v = createVideoClip(p, { id: 'm', kind: 'video', name: 'v', status: 'ready', duration: 10, width: 1080, height: 1920, url: '', hasAudio: true } as never, 0);
+    v.duration = 10;
+    p = placeClip(p, v);
     const segs = [
-      { falante: 1, inicio: 0, fim: 2.4, texto: 'Bom dia, aqui é o Primeiras Notícias.' },
+      { falante: 1, inicio: 0.5, fim: 2.4, texto: 'Bom dia, aqui é o Primeiras Notícias.' },
       { falante: 2, inicio: 3, fim: 5, texto: 'Obrigado pelo convite.' },
     ];
-    const clips = buildCaptionClips(p, segs, 'destaque', false);
-    expect(clips).toHaveLength(2);
-    for (const c of clips) expect(TextClipSchema.safeParse(c).success).toBe(true);
-    expect(clips[1]!.caption).toMatchObject({ speaker: 2, look: 'destaque' });
-    let next = applyCaptions(p, clips);
-    next = applyCaptions(next, buildCaptionClips(next, segs.slice(0, 1), 'caixa', true));
-    const caps = next.clips.filter((c) => c.type === 'text' && c.preset === CAPTION_PRESET);
+    const blocos = blocosDeFala(p);
+    expect(blocos.map((x) => x.id)).toEqual([v.id]);
+    const { clips, grupos } = buildCaptionBlocks(p, frases(segs, []), blocos, 'destaque', false);
+    expect(clips).toHaveLength(1); // um bloco só, não um item por frase
+    const c = clips[0]!;
+    expect(TextClipSchema.safeParse(c).success).toBe(true);
+    expect(c.start).toBe(0);
+    expect(c.duration).toBe(10); // do tamanho do vídeo
+    expect(c.group).toBe(grupos.get(v.id));
+    expect(new Set(c.caption!.words.map((w) => w.s)).size).toBeGreaterThanOrEqual(2); // as frases ficam dentro
+    expect(c.caption!.words.find((w) => w.w === 'Obrigado')!.sp).toBe(2);
+    let next = applyCaptions(p, clips, grupos, true);
+    expect(next.clips.find((x) => x.id === v.id)!.group).toBe(c.group); // vídeo agrupado com a legenda
+    const outro = buildCaptionBlocks(next, frases(segs.slice(0, 1), []), blocosDeFala(next), 'caixa', true);
+    next = applyCaptions(next, outro.clips, outro.grupos, true);
+    const caps = next.clips.filter((x) => x.type === 'text' && x.preset === CAPTION_PRESET);
     expect(caps).toHaveLength(1);
-    expect(next.tracks.filter((t) => t.name === 'Legendas')).toHaveLength(1);
-    expect(next.tracks.find((t) => t.id === caps[0]!.trackId)!.name).toBe('Legendas');
+    expect(next.tracks.filter((tr) => tr.name === 'Legendas')).toHaveLength(1);
+  });
+
+  it('na tela aparece só a frase da hora (um instante antes da fala) e o ajuste de sincronia vale', async () => {
+    const { phraseAt } = await import('../render/captions');
+    const c = {
+      duration: 10,
+      fields: { kicker: '', title: 'bom dia gente\nobrigado pelo convite', subtitle: '' },
+      caption: { speaker: 1, look: 'limpa', words: [
+        { w: 'bom', t: 1, e: 1.3, s: 0 }, { w: 'dia', t: 1.3, e: 1.6, s: 0 }, { w: 'gente', t: 1.6, e: 2, s: 0 },
+        { w: 'obrigado', t: 4, e: 4.5, s: 1, sp: 2 }, { w: 'pelo', t: 4.5, e: 4.7, s: 1, sp: 2 }, { w: 'convite', t: 4.7, e: 5.2, s: 1, sp: 2 },
+      ] },
+    } as never;
+    expect(phraseAt(c, 0.5)).toBeNull(); // antes de falar
+    expect(phraseAt(c, 0.92)!.words[0]!.w).toBe('bom'); // aparece um tiquinho antes
+    expect(phraseAt(c, 3)).toBeNull(); // pausa entre as frases
+    const p2 = phraseAt(c, 4.6)!;
+    expect(p2.words.map((w) => w.w)).toEqual(['obrigado', 'pelo', 'convite']);
+    expect(p2.speaker).toBe(2);
+    // atrasar 0,5 s: em 1,3 s ainda não apareceu
+    const atrasada = { ...(c as object), caption: { ...(c as { caption: object }).caption, offset: 0.5 } } as never;
+    expect(phraseAt(atrasada, 1.3)).toBeNull();
+    // corrigiu um erro de digitação na linha (mesmo número de palavras): mantém o tempo
+    const corrigida = { ...(c as object), fields: { kicker: '', title: 'bom dia, gente\nobrigado pelo convite', subtitle: '' } } as never;
+    expect(phraseAt(corrigida, 1.4)!.words[1]!.w).toBe('dia,');
   });
 
   it('manda o áudio como input_audio na OpenRouter e soma o custo', async () => {

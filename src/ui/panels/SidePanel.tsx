@@ -16,7 +16,7 @@ import { ACCEPT_ATTR, importFiles, onUploads, refreshBrand, type UploadProgress 
 import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
 import { isBundledBrand, isSupersededBrand } from '../../platform/bundledBrand';
-import { CAPTION_PRESET, generateCaptions, restyleCaptions, type CaptionLook, type CaptionStyle } from '../captions';
+import { CAPTION_PRESET, generateCaptions, getCaptionStyle, restyleCaptions, saveCaptionStyle, type CaptionLook, type CaptionStyle } from '../captions';
 import { AiEditPanel } from './AiEditPanel';
 import { AiSpend } from '../AiSpend';
 
@@ -346,7 +346,7 @@ function Choice<T extends string | number | boolean>({ label, value, options, on
 function AutoCaptions() {
   const notify = useEditor((s) => s.notify);
   const count = useEditor((s) => s.project?.clips.filter((c) => c.type === 'text' && c.preset === CAPTION_PRESET).length ?? 0);
-  const [st, setSt] = useState<CaptionStyle>({ look: 'destaque', upper: false, linhas: 2, align: 'center' });
+  const [st, setSt] = useState<CaptionStyle>(getCaptionStyle);
   const fundo = st.look === 'caixa' || st.look === 'caixa-destaque';
   const palavra = st.look === 'destaque' || st.look === 'caixa-destaque';
   const [step, setStep] = useState<string | null>(null);
@@ -354,7 +354,7 @@ function AutoCaptions() {
     setStep('Começando…');
     try {
       const r = await generateCaptions({ ...st, onStep: setStep });
-      notify(`${r.count} legendas criadas${r.falantes > 1 ? `, ${r.falantes} pessoas falando (cada uma com uma cor)` : ''}.`, 'info');
+      notify(`Legendas criadas em ${r.count} bloco(s), ligados aos vídeos${r.falantes > 1 ? `; ${r.falantes} pessoas falando (cada uma com uma cor)` : ''}.`, 'info');
     } catch (e) {
       notify((e as Error).message, 'error');
     } finally {
@@ -362,22 +362,40 @@ function AutoCaptions() {
     }
   };
   const set = (patch: Partial<CaptionStyle>) => {
-    setSt((cur) => ({ ...cur, ...patch }));
+    setSt((cur) => {
+      const next = { ...cur, ...patch };
+      saveCaptionStyle(next);
+      return next;
+    });
     if (count) restyleCaptions(patch);
   };
+  const ajuste = (d: number) => set({ offset: Math.max(-3, Math.min(3, Math.round(((st.offset ?? 0) + d) * 100) / 100)) });
   return (
     <section className="preset-section cap-panel" data-testid="auto-captions">
       <h4>Legendas automáticas</h4>
-      <p className="hint">A IA ouve a fala do vídeo e escreve as legendas no tempo da fala. Se falar mais de uma pessoa, cada uma ganha uma cor.</p>
+      <p className="hint">A IA ouve a fala e escreve; o tempo de cada palavra vem de um ouvinte no próprio aparelho (baixado só na 1ª vez, ~80 MB). Sai um bloco de legenda por trecho de vídeo, ligado a ele (arrastou o vídeo, a legenda vai junto). Para só um trecho: toque no vídeo → Ajustes → "Gerar legenda deste trecho".</p>
       <Choice label="Fundo" value={fundo} options={[[false, 'Sem fundo'], [true, 'Com fundo']]} onPick={(v) => set({ look: lookOf(v, palavra) })} testId="caption-bg" />
       <Choice label="Palavra falada" value={palavra} options={[[true, 'Acende em azul'], [false, 'Sem destaque']]} onPick={(v) => set({ look: lookOf(fundo, v) })} testId="caption-hl" />
       <Choice label="Letras" value={st.upper} options={[[false, 'Normal'], [true, 'MAIÚSCULAS']]} onPick={(v) => set({ upper: v })} testId="caption-upper" />
       <Choice label="Linhas" value={st.linhas} options={[[1, '1'], [2, '2'], [3, '3']]} onPick={(v) => set({ linhas: v })} testId="caption-lines" />
       <Choice label="Posição" value={st.align} options={[['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita']]} onPick={(v) => set({ align: v })} testId="caption-align" />
+      <Choice label="Tempo das palavras" value={st.precisa !== false} options={[[true, 'Exato (ouve no aparelho)'], [false, 'Rápido (pelas sílabas)']]} onPick={(v) => set({ precisa: v })} testId="caption-precisa" />
+      <div className="cap-row">
+        <span className="cap-label">Sincronia</span>
+        <div className="cap-opts">
+          <button className="btn sm" onClick={() => ajuste(-0.1)} data-testid="caption-sync-menos" title="A legenda aparece antes">
+            Adiantar 0,1 s
+          </button>
+          <b className="small" data-testid="caption-sync">{(st.offset ?? 0) === 0 ? 'no tempo' : `${(st.offset ?? 0) > 0 ? '+' : ''}${(st.offset ?? 0).toFixed(1).replace('.', ',')} s`}</b>
+          <button className="btn sm" onClick={() => ajuste(0.1)} data-testid="caption-sync-mais" title="A legenda aparece depois">
+            Atrasar 0,1 s
+          </button>
+        </div>
+      </div>
       <button className="btn primary wide cap-go" disabled={!!step} onClick={() => void run()} data-testid="caption-generate">
         {step ?? (count ? 'Gerar de novo (substitui as atuais)' : 'Gerar legendas da fala')}
       </button>
-      {count > 0 && <p className="hint small" data-testid="caption-count">{count} legendas na trilha "Legendas". Toque numa para corrigir o texto; arraste ou estique a caixa no vídeo e todas acompanham.</p>}
+      {count > 0 && <p className="hint small" data-testid="caption-count">{count} {count === 1 ? 'bloco' : 'blocos'} de legenda na trilha "Legendas" (um por trecho de vídeo). Toque num para corrigir o texto; arraste ou estique a caixa no vídeo e todas acompanham.</p>}
       <AiSpend compact />
     </section>
   );

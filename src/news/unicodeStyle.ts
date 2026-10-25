@@ -4,7 +4,8 @@
  * (𝗔𝗕𝗖). Aparecem em negrito na legenda, mas a busca do Instagram não as
  * indexa — por isso só o título e o rótulo dos créditos ficam em negrito;
  * o corpo e as hashtags continuam normais.
- * Acentos são mantidos como sinais combinantes (Á = 𝗔 + ◌́).
+ * Letra com acento (É, Ã, Ç...) fica NORMAL, sem negrito: no negrito Unicode o
+ * acento vira um sinal solto que some em maiúscula e a palavra fica ilegível.
  */
 const BOLD_UPPER = 0x1d5d4; // 𝗔
 const BOLD_LOWER = 0x1d5ee; // 𝗮
@@ -12,12 +13,12 @@ const BOLD_DIGIT = 0x1d7ec; // 𝟬
 
 export function toBold(s: string): string {
   let out = '';
-  for (const ch of s.normalize('NFD')) {
+  for (const ch of s.normalize('NFC')) {
     const c = ch.codePointAt(0)!;
     if (c >= 65 && c <= 90) out += String.fromCodePoint(BOLD_UPPER + c - 65);
     else if (c >= 97 && c <= 122) out += String.fromCodePoint(BOLD_LOWER + c - 97);
     else if (c >= 48 && c <= 57) out += String.fromCodePoint(BOLD_DIGIT + c - 48);
-    else out += ch;
+    else out += ch; // acentuadas (É, Ã, Ç) e o resto ficam como estão
   }
   return out;
 }

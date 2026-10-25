@@ -23,6 +23,8 @@ interface EditorState {
   /** pixels por segundo na timeline */
   zoom: number;
   snapping: boolean;
+  /** juntar trechos: tira os vácuos depois de mover/cortar/apagar */
+  fechaVaos: boolean;
   safeZones: boolean;
   /** prévia em tela cheia (sem controles de edição sobre o vídeo) */
   previewFull: boolean;
@@ -92,6 +94,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   playing: false,
   zoom: 80,
   snapping: true,
+  fechaVaos: false,
   safeZones: false,
   previewFull: false,
   cropId: null,

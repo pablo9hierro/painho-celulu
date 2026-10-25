@@ -55,6 +55,30 @@ export async function firstPhoto(imagens: { src: string }[], referer: string): P
   return null;
 }
 
+/** até `max` fotos diferentes da matéria além da primeira (para o slide do Reels) */
+export async function morePhotos(imagens: { src: string }[], referer: string, max = 2): Promise<File[]> {
+  const out: File[] = [];
+  const vistos = new Set<string>();
+  let primeira = true;
+  for (const im of imagens.slice(0, 8)) {
+    if (out.length >= max) break;
+    const chave = im.src.replace(/[?#].*/, '').replace(/-\d+x\d+(?=\.)/, '');
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    try {
+      const f = await fetchPhoto(im.src, referer);
+      if (primeira) {
+        primeira = false; // a 1ª já é a capa
+        continue;
+      }
+      if (f.size > 25_000) out.push(f);
+    } catch {
+      /* próxima */
+    }
+  }
+  return out;
+}
+
 export interface BlogResult {
   story: SiteStory;
   siteId: number | null;
@@ -70,7 +94,14 @@ export async function postToBlog(p: Pauta, opts: { prompt?: string; story?: Site
     step('Escrevendo a matéria (fatos da fonte, destaque e tom)…');
     story = await writeSite(p, opts.prompt ?? '', tonesForAi(loadTones()));
   }
-  if (!story.model && !opts.story) throw new Error('A IA não escreveu esta matéria (confira a chave da IA em Configurações).');
+  if (!story.model && !opts.story) {
+    const semTexto = story.steps.some((s) => /não trouxe texto|sem IA/.test(s)) && !story.steps.some((s) => /IA indisponível/.test(s));
+    throw new Error(
+      semTexto
+        ? 'O portal não deixou ler o texto e não achei a mesma notícia em outro portal: sem os fatos, não dá para escrever.'
+        : `A IA não respondeu (${story.steps.find((s) => /IA indisponível/.test(s)) ?? 'sem detalhe'}).`,
+    );
+  }
   step('Baixando a foto de capa…');
   const photo = await firstPhoto(story.imagens, p.url);
   step('Publicando no site…');
@@ -84,6 +115,7 @@ export async function postToBlog(p: Pauta, opts: { prompt?: string; story?: Site
     foto: photo ? { data: new Uint8Array(await photo.arrayBuffer()), type: photo.type, name: photo.name } : null,
     publicar: true,
   });
+  contarPublicada();
   // fila do Instagram (só se tiver foto: o vídeo precisa dela)
   let naFila = false;
   if (photo) {
@@ -103,4 +135,24 @@ export async function postToBlog(p: Pauta, opts: { prompt?: string; story?: Site
     naFila = true;
   }
   return { story, siteId: r.id, steps: r.steps, naFila };
+}
+
+const HOJE_KEY = 'pn-blog-hoje';
+const diaBR = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+/** conta cada matéria publicada no site hoje (na mão ou no automático) */
+function contarPublicada() {
+  try {
+    const c = JSON.parse(localStorage.getItem(HOJE_KEY) ?? '{}') as { dia?: string; n?: number };
+    localStorage.setItem(HOJE_KEY, JSON.stringify({ dia: diaBR(), n: c.dia === diaBR() ? (c.n ?? 0) + 1 : 1 }));
+  } catch {
+    /* sem armazenamento */
+  }
+}
+export function blogPublicadasHoje(): number {
+  try {
+    const c = JSON.parse(localStorage.getItem(HOJE_KEY) ?? '{}') as { dia?: string; n?: number };
+    return c.dia === diaBR() ? (c.n ?? 0) : 0;
+  } catch {
+    return 0;
+  }
 }
