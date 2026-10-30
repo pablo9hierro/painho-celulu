@@ -5,11 +5,18 @@
  * A IA devolve frases curtas com início/fim e QUEM fala (1, 2, 3...); as
  * pessoas são mantidas entre pedaços passando a descrição de cada voz.
  */
-import { fetchPost, MODELS, providerOf, type Post } from './openrouter';
+import { fetchPost, providerOf, type Post } from './openrouter';
 import { estimateUsd, recordAi } from './cost';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const GOOGLE = 'https://generativelanguage.googleapis.com/v1beta';
+/**
+ * Legenda: o Pro entende muito melhor a fala (nomes, gíria, duas pessoas falando,
+ * frase repetida) — medido num vídeo real. Raciocínio curto: ~US$ 0,02 por minuto.
+ * Se ele falhar, os mais baratos.
+ */
+const LEGENDA = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const PENSAR = 256;
 
 export interface Segmento {
   falante: number;
@@ -36,6 +43,8 @@ function prompt(dur: number, falantes: Falante[]): string {
     falantes.length
       ? `Pessoas já identificadas nos trechos anteriores (mantenha o mesmo número para a mesma voz): ${falantes.map((f) => `${f.id} = ${f.voz}`).join('; ')}.`
       : '',
+    'Escreva do jeito que a pessoa FALOU, no português falado do Brasil (pra, tá, né, tô, cê, véi, mano...), sem corrigir nem resumir: cada palavra dita entra, inclusive repetições.',
+    'Nomes próprios com a grafia certa (pessoas conhecidas, cidades e bairros da Paraíba: Guarabira, João Pessoa, Campina Grande, Bayeux, Santa Rita...).',
     'Não invente fala: trechos só com música ou silêncio ficam de fora. Pontuação normal, sem tudo em maiúsculas.',
     'Responda só JSON: {"segmentos":[{"falante":1,"inicio":0.0,"fim":2.4,"texto":"..."}],"falantes":[{"id":1,"voz":"descrição curta da voz, ex.: homem, voz grave"}]}',
   ]
@@ -81,10 +90,10 @@ export async function transcribeWav(key: string, wavB64: string, dur: number, fa
   const text = prompt(dur, falantes);
   const errors: string[] = [];
   if (providerOf(k) === 'google') {
-    for (const model of ['gemini-2.5-flash-lite', 'gemini-2.5-flash']) {
+    for (const model of LEGENDA) {
       const r = await post(`${GOOGLE}/models/${model}:generateContent?key=${encodeURIComponent(k)}`, { 'Content-Type': 'application/json' }, {
         contents: [{ role: 'user', parts: [{ text }, { inline_data: { mime_type: 'audio/wav', data: wavB64 } }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 4000, responseMimeType: 'application/json' },
+        generationConfig: { temperature: 0, maxOutputTokens: 8000, responseMimeType: 'application/json', ...(model.endsWith('pro') ? { thinkingConfig: { thinkingBudget: PENSAR } } : {}) },
       });
       const j = r.json as { candidates?: { content?: { parts?: { text?: string }[] } }[]; error?: { message?: string }; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } } | null;
       const content = j?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
@@ -97,7 +106,7 @@ export async function transcribeWav(key: string, wavB64: string, dur: number, fa
     }
     throw new Error(errors.join(' | '));
   }
-  for (const model of MODELS) {
+  for (const model of LEGENDA.map((m) => `google/${m}`)) {
     const r = await post(
       ENDPOINT,
       { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://primeirasnoticias.com.br', 'X-Title': 'Primeiras Noticias Studio' },
@@ -105,7 +114,8 @@ export async function transcribeWav(key: string, wavB64: string, dur: number, fa
         model,
         messages: [{ role: 'user', content: [{ type: 'text', text }, { type: 'input_audio', input_audio: { data: wavB64, format: 'wav' } }] }],
         temperature: 0,
-        max_tokens: 4000,
+        max_tokens: 8000,
+        ...(model.endsWith('pro') ? { reasoning: { max_tokens: PENSAR } } : {}),
         usage: { include: true },
         response_format: { type: 'json_object' },
       },

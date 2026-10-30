@@ -29,7 +29,7 @@ import { confirmDialog } from './dialogs';
 import { IconClose, IconSettings, IconTrash, IconUpload } from './icons';
 import { SettingsDialog } from './SettingsDialog';
 import { MusicTrim } from './MusicTrim';
-import { postToBlog } from '../news/blogPost';
+import { morePhotos, postToBlog } from '../news/blogPost';
 import { ensureDefaultTones, trackUrl } from '../news/defaultTones';
 import { releases } from '../news/release';
 import { videoTexts } from '../news/videoTexts';
@@ -180,6 +180,8 @@ function PautasTab({ busy, setBusy, openSettings }: { busy: string | null; setBu
         subtitle: vt.subtitulo,
         keywords: [vt.destaque ?? '', ...story.palavrasChave].filter(Boolean),
         photo: await photo(story, open),
+        // mais fotos da matéria: slide, uma atrás da outra
+        morePhotos: await morePhotos(story.imagens, open.url),
         audioId: tone?.track.mediaId ?? null,
         audioStart: tone?.track.inicio,
         audioDur: tone?.track.dur ?? TRECHO_S,

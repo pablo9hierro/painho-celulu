@@ -9,6 +9,7 @@
 export const PRICES: Record<string, [number, number]> = {
   'gemini-2.5-flash-lite': [0.1, 0.4],
   'gemini-2.5-flash': [0.3, 2.5],
+  'gemini-2.5-pro': [1.25, 10],
 };
 
 export function estimateUsd(model: string, inTokens: number, outTokens: number): number {

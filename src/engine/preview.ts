@@ -259,7 +259,16 @@ class PreviewEngine {
     for (const key of new Set([...this.slotOf.values()])) {
       alive.add(key);
       const c = atual.get(key) ?? proximo.get(key);
-      if (!c) continue;
+      if (!c) {
+        // vaga sem pedaço agora nem depois: PARA e cala (senão o resto do vídeo original
+        // seguia tocando escondido, com som, como se não tivesse cortado)
+        const e = this.els.get(key);
+        if (e) {
+          if (!e.el.paused) e.el.pause();
+          this.setGain(e.el, 0);
+        }
+        continue;
+      }
       const el = this.ensure(c, key);
       if (!el) continue;
       const active = atual.has(key);

@@ -90,7 +90,7 @@ describe('legendas automáticas', () => {
       body = b as typeof body;
       return { status: 200, json: { choices: [{ message: { content: '{"segmentos":[{"falante":1,"inicio":0,"fim":1.5,"texto":"Olá"}],"falantes":[]}' } }], usage: { cost: 0.0002 } } };
     });
-    expect(body.model).toBe('google/gemini-2.5-flash-lite');
+    expect(body.model).toBe('google/gemini-2.5-pro');
     expect(body.messages![0]!.content[1]).toMatchObject({ type: 'input_audio', input_audio: { format: 'wav' } });
     expect(JSON.stringify(body)).toContain('1 = mulher');
     expect(r.segmentos[0]!.texto).toBe('Olá');

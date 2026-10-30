@@ -17,7 +17,6 @@ import { formatTime } from '../Transport';
 import { confirmDialog } from '../dialogs';
 import { isBundledBrand, isSupersededBrand } from '../../platform/bundledBrand';
 import { CAPTION_PRESET, generateCaptions, getCaptionStyle, restyleCaptions, saveCaptionStyle, type CaptionLook, type CaptionStyle } from '../captions';
-import { AiEditPanel } from './AiEditPanel';
 import { AiSpend } from '../AiSpend';
 
 /** arrastar para a timeline só com mouse; no toque, arrastar disparava inserção dupla */
@@ -30,7 +29,6 @@ const TITLES: Record<Panel, string> = {
   text: 'Manchetes e molduras',
   blur: 'Desfoque',
   audio: 'Áudio',
-  ia: 'Editar com IA',
 };
 
 export function SidePanel({ panel, onClose }: { panel: Panel; onClose: () => void }) {
@@ -45,7 +43,6 @@ export function SidePanel({ panel, onClose }: { panel: Panel; onClose: () => voi
       <div className="panel-body">
         {panel === 'media' && <MediaPanel kinds={['video', 'image']} />}
         {panel === 'audio' && <MediaPanel kinds={['audio']} />}
-        {panel === 'ia' && <AiEditPanel />}
         {panel === 'brand' && <BrandPanel />}
         {panel === 'text' && <TextPanel />}
         {panel === 'blur' && <BlurPanel />}

@@ -134,14 +134,21 @@ export class SequentialDecoder {
   private canvas: HTMLCanvasElement | null = null;
   /** apresentação do 1º quadro: o <video> considera esse instante como 0 */
   private origin: number;
+  /** fim do último quadro do arquivo (µs) */
+  private lastTs: number;
   /** dados já lidos à frente (índice → bytes) */
   private ahead = new Map<number, Uint8Array>();
   private gen = 0;
 
   private constructor(private readonly d: Demuxed) {
     let o = Infinity;
-    for (const s of d.meta) if (s.ts < o) o = s.ts;
+    let fim = -Infinity;
+    for (const s of d.meta) {
+      if (s.ts < o) o = s.ts;
+      if (s.ts + s.dur > fim) fim = s.ts + s.dur;
+    }
     this.origin = o;
+    this.lastTs = fim;
     this.createDecoder();
   }
 
@@ -269,6 +276,10 @@ export class SequentialDecoder {
     }
     const frame = this.current ?? this.queue[0] ?? null;
     if (!frame) return null;
+    // trava: alguns decodificadores de celular devolvem quadro de outro ponto do arquivo
+    // (o vídeo saía "inteiro", ignorando os cortes). Quadro longe do pedido: desiste, e
+    // quem chamou passa este trecho para o <video> posicionado quadro a quadro.
+    if (Math.abs(frame.timestamp - target) > 400_000 && target <= this.lastTs) throw new Error('quadro fora do lugar');
     if (!this.d.rotation) return frame;
     return this.rotated(frame);
   }

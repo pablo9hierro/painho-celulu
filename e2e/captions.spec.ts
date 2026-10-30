@@ -40,7 +40,7 @@ test('legendas automáticas: transcreve a fala, separa quem fala e muda o estilo
   await page.getByTestId('caption-generate').click();
   await expect(page.getByTestId('caption-count')).toContainText('1 bloco', { timeout: 60_000 });
   // o áudio foi de verdade, como WAV
-  expect(sent!.model).toBe('google/gemini-2.5-flash-lite');
+  expect(sent!.model).toBe('google/gemini-2.5-pro');
   const audio = sent!.messages![0]!.content.find((c) => c.type === 'input_audio')!.input_audio!;
   expect(audio.format).toBe('wav');
   expect(audio.data.startsWith('UklGR')).toBe(true);

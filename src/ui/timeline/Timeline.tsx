@@ -39,7 +39,6 @@ import {
   IconMagnet,
   IconMute,
   IconPlus,
-  IconMic,
   IconSplit,
   IconTrash,
   IconUnlock,
@@ -540,9 +539,6 @@ export function Timeline() {
           data-testid="tl-gaps"
         >
           Juntar trechos
-        </button>
-        <button className="icon-btn" onClick={() => getEditor().set('panel', 'ia')} title="Editar por voz (IA)" aria-label="Editar por voz" data-testid="tl-voz">
-          <IconMic />
         </button>
         <div className="tl-spacer" />
         <button className="icon-btn" onClick={fit} title="Ajustar a timeline à tela" aria-label="Ajustar">

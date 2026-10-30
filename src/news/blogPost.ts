@@ -56,11 +56,11 @@ export async function firstPhoto(imagens: { src: string }[], referer: string): P
 }
 
 /** até `max` fotos diferentes da matéria além da primeira (para o slide do Reels) */
-export async function morePhotos(imagens: { src: string }[], referer: string, max = 2): Promise<File[]> {
+export async function morePhotos(imagens: { src: string }[], referer: string, max = 4): Promise<File[]> {
   const out: File[] = [];
   const vistos = new Set<string>();
   let primeira = true;
-  for (const im of imagens.slice(0, 8)) {
+  for (const im of imagens.slice(0, 10)) {
     if (out.length >= max) break;
     const chave = im.src.replace(/[?#].*/, '').replace(/-\d+x\d+(?=\.)/, '');
     if (vistos.has(chave)) continue;

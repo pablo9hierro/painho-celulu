@@ -113,6 +113,8 @@ export function casarTempos(segs: Segmento[], relogio: PalavraTempo[]): Palavra[
     } else if (L[i + 1]![j]! >= L[i]![j + 1]!) i++;
     else j++;
   }
+  // o ouvinte entendeu pouco (áudio ruim, saiu do ar no meio): não confia nele, quem chama usa a voz/sílabas
+  if (ini.filter((x) => x !== null).length < A.length * 0.35) return [];
   // as que não casaram: entre as vizinhas casadas (pelo peso de cada palavra) ou, na ponta, pelo tempo da IA
   for (let k = 0; k < A.length; k++) {
     if (ini[k] !== null) continue;
