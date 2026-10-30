@@ -95,11 +95,13 @@ export async function postToBlog(p: Pauta, opts: { prompt?: string; story?: Site
     story = await writeSite(p, opts.prompt ?? '', tonesForAi(loadTones()));
   }
   if (!story.model && !opts.story) {
-    const semTexto = story.steps.some((s) => /não trouxe texto|sem IA/.test(s)) && !story.steps.some((s) => /IA indisponível/.test(s));
+    const tem = (re: RegExp) => story!.steps.some((s) => re.test(s));
     throw new Error(
-      semTexto
-        ? 'O portal não deixou ler o texto e não achei a mesma notícia em outro portal: sem os fatos, não dá para escrever.'
-        : `A IA não respondeu (${story.steps.find((s) => /IA indisponível/.test(s)) ?? 'sem detalhe'}).`,
+      tem(/Sem chave de IA/)
+        ? 'Falta a chave da IA: coloque em ⚙ Configurações (tela inicial). Sem ela não dá para escrever a matéria.'
+        : tem(/IA indisponível/)
+          ? `A IA não respondeu (${story.steps.find((s) => /IA indisponível/.test(s))}).`
+          : 'O portal não deixou ler o texto e não achei a mesma notícia em outro portal: sem os fatos, não dá para escrever.',
     );
   }
   step('Baixando a foto de capa…');

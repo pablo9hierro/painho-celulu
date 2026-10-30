@@ -158,7 +158,8 @@ export async function writeSiteStory(p: Pauta, rawChat: Chat | null, prompt = ''
         steps.push('Checagem da IA indisponível (feita só a conferência automática).');
       }
     }
-  } else if (!fonteTexto) steps.push('A fonte não trouxe texto suficiente para escrever.');
+  } else if (!fonteTexto || fonteTexto.length <= 200) steps.push('A fonte não trouxe texto suficiente para escrever.');
+  else steps.push('Sem chave de IA configurada.');
   // reserva sem IA: rascunho curto, atribuído à fonte (para o jornalista completar)
   if (!j?.paragrafos?.length) {
     const ps = p.blocks.filter((b) => b.type === 'p').slice(0, 4).map((b) => b.text!);
